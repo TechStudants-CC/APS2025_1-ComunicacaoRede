@@ -5,7 +5,7 @@ import java.awt.*;
 import java.io.*;
 import java.nio.file.Files;
 import common.Message;
-import common.Message.MessageType;
+import common.MessageType;
 
 public class PrivateChatWindow extends JFrame {
     private JTextArea chatArea;
@@ -14,40 +14,51 @@ public class PrivateChatWindow extends JFrame {
     private String receiver;
     private Client client;
 
+    // Cores
+    private final Color darkBg = new Color(30, 30, 30);
+    private final Color lightText = new Color(220, 220, 220);
+
     public PrivateChatWindow(String sender, String receiver, Client client) {
         this.sender = sender;
         this.receiver = receiver;
         this.client = client;
 
-        setTitle("Chat Privado com: " + receiver);
+        setTitle("Privado: " + receiver);
         setSize(500, 400);
         setLayout(new BorderLayout());
+        getContentPane().setBackground(darkBg);
 
         chatArea = new JTextArea();
         chatArea.setEditable(false);
+        chatArea.setBackground(darkBg);
+        chatArea.setForeground(lightText);
         add(new JScrollPane(chatArea), BorderLayout.CENTER);
 
         JPanel bottom = new JPanel(new BorderLayout());
+        bottom.setBackground(darkBg);
+
         inputField = new JTextField();
-        inputField.addActionListener(e -> sendPrivateMessage());
+        inputField.setBackground(new Color(50, 50, 50));
+        inputField.setForeground(lightText);
+        inputField.addActionListener(e -> sendMessage());
         bottom.add(inputField, BorderLayout.CENTER);
 
-        JButton sendFileBtn = new JButton("📎");
-        sendFileBtn.setToolTipText("Enviar Arquivo");
-        sendFileBtn.addActionListener(e -> sendFile());
-        bottom.add(sendFileBtn, BorderLayout.EAST);
+        JButton fileBtn = new JButton("📎");
+        fileBtn.setBackground(new Color(0, 150, 70));
+        fileBtn.setForeground(Color.WHITE);
+        fileBtn.addActionListener(e -> sendFile());
+        bottom.add(fileBtn, BorderLayout.EAST);
 
         add(bottom, BorderLayout.SOUTH);
-
         setVisible(true);
     }
 
-    private void sendPrivateMessage() {
+    private void sendMessage() {
         String text = inputField.getText().trim();
         if (!text.isEmpty()) {
             Message msg = new Message(sender, receiver, text, MessageType.PRIVATE);
             client.sendMessage(msg);
-            appendMessage(msg);
+            chatArea.append("[Você]: " + text + "\n");
             inputField.setText("");
         }
     }
@@ -62,7 +73,7 @@ public class PrivateChatWindow extends JFrame {
                 msg.setFileData(data);
                 msg.setFileName(file.getName());
                 client.sendMessage(msg);
-                appendMessage(msg);
+                chatArea.append("[Você] (Arquivo): " + file.getName() + "\n");
             } catch (IOException e) {
                 JOptionPane.showMessageDialog(this, "Erro ao enviar arquivo.", "Erro", JOptionPane.ERROR_MESSAGE);
             }
@@ -70,7 +81,6 @@ public class PrivateChatWindow extends JFrame {
     }
 
     public void appendMessage(Message msg) {
-        String time = "[" + msg.getTimestamp().toString().substring(11, 16) + "]";
-        chatArea.append(time + " " + msg.getSender() + ": " + msg.getContent() + "\n");
+        chatArea.append("[" + msg.getSender() + "]: " + msg.getContent() + "\n");
     }
 }

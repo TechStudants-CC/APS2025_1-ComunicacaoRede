@@ -1,11 +1,10 @@
 package client;
 
 import javax.swing.*;
+import javax.swing.border.EmptyBorder;
 import java.awt.*;
-import java.io.*;
-import java.util.List;
-import java.util.Map;
-import java.util.HashMap;
+import java.io.IOException;
+import java.util.*;
 import common.Message;
 
 public class ClientGUI extends JFrame {
@@ -15,46 +14,120 @@ public class ClientGUI extends JFrame {
     private String username;
     private Map<String, PrivateChatWindow> privateChats = new HashMap<>();
 
-    public ClientGUI() {
-        setTitle("Chat Ambiental - Cliente");
-        setSize(800, 600);
-        setLayout(new BorderLayout());
+    // Cores
+    private final Color darkBg = new Color(30, 30, 30);
+    private final Color lightText = new Color(220, 220, 220);
+    private final Color accentGreen = new Color(0, 200, 100);
 
-        // Área de usuários
+    public ClientGUI() {
+        configureLookAndFeel();
+        setupInterface();
+        connect();
+    }
+
+    private void configureLookAndFeel() {
+        try {
+            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+        } catch (Exception ignored) {}
+    }
+
+    private void setupInterface() {
+        setTitle("Chat - Cliente");
+        setSize(800, 500);
+        setLayout(new GridBagLayout());
+        getContentPane().setBackground(darkBg);
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.fill = GridBagConstraints.BOTH;
+
+        // Painel Esquerdo (Usuários Online)
+        JPanel leftPanel = new JPanel(new GridBagLayout());
+        leftPanel.setBackground(darkBg);
+        leftPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
+
+        JLabel usersLabel = new JLabel("Usuários Online", SwingConstants.CENTER);
+        usersLabel.setFont(new Font("Arial", Font.BOLD, 14));
+        usersLabel.setForeground(accentGreen);
+        gbc.gridy = 0;
+        leftPanel.add(usersLabel, gbc);
+
         userModel = new DefaultListModel<>();
         userList = new JList<>(userModel);
-        userList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        userList.setBackground(new Color(50, 50, 50));
+        userList.setForeground(lightText);
         JScrollPane userScroll = new JScrollPane(userList);
         userScroll.setPreferredSize(new Dimension(200, 0));
-        add(userScroll, BorderLayout.WEST);
+        gbc.gridy = 1;
+        gbc.weighty = 1;
+        leftPanel.add(userScroll, gbc);
 
-        // Área de botões
+        JButton privateBtn = createStyledButton("Chat Direto");
+        privateBtn.addActionListener(e -> startPrivateChat());
+        JButton groupBtn = createStyledButton("Criar Grupo");
+        groupBtn.addActionListener(e -> createGroup());
         JPanel buttonPanel = new JPanel(new GridLayout(2, 1, 10, 10));
-        JButton startChatButton = new JButton("Iniciar Chat Direto");
-        startChatButton.addActionListener(e -> startPrivateChat());
-        JButton createGroupButton = new JButton("Criar Grupo");
-        createGroupButton.addActionListener(e -> createGroup());
-        buttonPanel.add(startChatButton);
-        buttonPanel.add(createGroupButton);
-        add(buttonPanel, BorderLayout.CENTER);
+        buttonPanel.setBackground(darkBg);
+        buttonPanel.add(privateBtn);
+        buttonPanel.add(groupBtn);
+        gbc.gridy = 2;
+        gbc.weighty = 0;
+        leftPanel.add(buttonPanel, gbc);
 
-        connect();
-        
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        gbc.weightx = 0.2;
+        gbc.weighty = 1;
+        add(leftPanel, gbc);
+
+        // Painel Central (Instruções)
+        JPanel centerPanel = new JPanel(new BorderLayout());
+        centerPanel.setBackground(darkBg);
+        centerPanel.setBorder(new EmptyBorder(20, 20, 20, 20));
+
+        JLabel infoLabel = new JLabel(
+            "<html><div style='text-align: center;'>Selecione um usuário para chat privado<br/>ou crie um grupo</div></html>",
+            SwingConstants.CENTER
+        );
+        infoLabel.setFont(new Font("Arial", Font.PLAIN, 16));
+        infoLabel.setForeground(lightText);
+        centerPanel.add(infoLabel, BorderLayout.CENTER);
+
+        gbc.gridx = 1;
+        gbc.gridy = 0;
+        gbc.weightx = 0.8;
+        add(centerPanel, gbc);
+
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setVisible(true);
     }
 
+    private JButton createStyledButton(String text) {
+        JButton button = new JButton(text);
+        button.setBackground(accentGreen);
+        button.setForeground(Color.WHITE);
+        button.setFont(new Font("Arial", Font.BOLD, 12));
+        button.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(accentGreen.darker(), 2),
+            BorderFactory.createEmptyBorder(8, 15, 8, 15)
+        ));
+        button.setFocusPainted(false);
+        return button;
+    }
+
     private void connect() {
-        username = JOptionPane.showInputDialog(this, "Digite seu nome de usuário:");
+        username = JOptionPane.showInputDialog(this, "Digite seu nome:");
         if (username != null && !username.trim().isEmpty()) {
             try {
                 client = new Client("127.0.0.1", 54321, username, this);
+                setTitle("Chat - " + username);
             } catch (IOException e) {
-                showError("Não foi possível conectar ao servidor.");
+                showError("Falha na conexão.");
+                System.exit(1);
             }
         } else {
-            showError("Nome de usuário inválido. Encerrando.");
-            System.exit(0);
+            showError("Nome inválido.");
+            System.exit(1);
         }
     }
 
@@ -67,83 +140,51 @@ public class ClientGUI extends JFrame {
                 privateChats.put(receiver, chat);
             }
             chat.setVisible(true);
-            chat.toFront();
         }
     }
 
     private void createGroup() {
-        DefaultListModel<String> groupModel = new DefaultListModel<>();
-        for (int i = 0; i < userModel.size(); i++) {
-            String user = userModel.getElementAt(i);
-            if (!user.equals(username)) {
-                groupModel.addElement(user);
-            }
-        }
-        JList<String> groupList = new JList<>(groupModel);
-        groupList.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
-        JScrollPane scroll = new JScrollPane(groupList);
-        scroll.setPreferredSize(new Dimension(200, 250));
-
-        int result = JOptionPane.showConfirmDialog(this, scroll, "Selecione usuários para o grupo", JOptionPane.OK_CANCEL_OPTION);
-        if (result == JOptionPane.OK_OPTION) {
-            List<String> selectedUsers = groupList.getSelectedValuesList();
-            if (selectedUsers.size() >= 2) {
-                new GroupChatWindow(username, selectedUsers, client);
-            } else {
-                showError("Selecione pelo menos 2 usuários.");
-            }
+        java.util.List<String> selectedUsers = userList.getSelectedValuesList();
+        if (selectedUsers.size() >= 2) {
+            new GroupChatWindow(username, selectedUsers, client);
+        } else {
+            showError("Selecione pelo menos 2 usuários.");
         }
     }
 
     public void handleMessage(Message msg) {
         switch (msg.getType()) {
             case USER_LIST:
-                updateUserList(msg.getContent());
+                SwingUtilities.invokeLater(() -> {
+                    userModel.clear();
+                    Arrays.stream(msg.getContent().split(","))
+                        .filter(user -> !user.trim().isEmpty() && !user.trim().equals(username))
+                        .forEach(user -> userModel.addElement(user.trim()));
+                });
                 break;
             case PRIVATE:
                 showPrivateMessage(msg);
                 break;
             case GROUP:
-                showGroupMessage(msg);
+                JOptionPane.showMessageDialog(this, "Nova mensagem no grupo de " + msg.getSender());
                 break;
             case FILE:
-                showFileMessage(msg);
+                JOptionPane.showMessageDialog(this, "Arquivo recebido de " + msg.getSender() + ": " + msg.getFileName());
                 break;
-            default:
+            case TEXT:
+                JOptionPane.showMessageDialog(this, "Mensagem de " + msg.getSender() + ": " + msg.getContent());
                 break;
         }
     }
 
-    private void updateUserList(String list) {
-        SwingUtilities.invokeLater(() -> {
-            userModel.clear();
-            for (String user : list.split(",")) {
-                if (!user.trim().isEmpty() && !user.equals(username)) {
-                    userModel.addElement(user.trim());
-                }
-            }
-        });
-    }
-
     private void showPrivateMessage(Message msg) {
-        if (msg.getSender() == null) return;
-
         PrivateChatWindow chat = privateChats.get(msg.getSender());
         if (chat == null) {
             chat = new PrivateChatWindow(username, msg.getSender(), client);
             privateChats.put(msg.getSender(), chat);
         }
-        chat.setVisible(true);
-        chat.toFront();
         chat.appendMessage(msg);
-    }
-
-    private void showGroupMessage(Message msg) {
-        JOptionPane.showMessageDialog(this, "Nova mensagem em grupo de " + msg.getSender() + ": " + msg.getContent());
-    }
-
-    private void showFileMessage(Message msg) {
-        JOptionPane.showMessageDialog(this, "Arquivo recebido de " + msg.getSender() + ": " + msg.getFileName());
+        chat.setVisible(true);
     }
 
     public void showError(String error) {
@@ -151,6 +192,6 @@ public class ClientGUI extends JFrame {
     }
 
     public static void main(String[] args) {
-        SwingUtilities.invokeLater(() -> new ClientGUI());
+        SwingUtilities.invokeLater(ClientGUI::new);
     }
 }
