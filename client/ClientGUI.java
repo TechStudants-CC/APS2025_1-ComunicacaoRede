@@ -3,6 +3,8 @@ package client;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
@@ -31,7 +33,7 @@ public class ClientGUI extends JFrame {
 
     public ClientGUI() {
         configureLookAndFeel();
-        connect(); // Conectar primeiro para obter username antes de setupInterface()
+        connect();
         setupInterface();
     }
 
@@ -47,7 +49,7 @@ public class ClientGUI extends JFrame {
         setLayout(new BorderLayout());
         getContentPane().setBackground(darkBg);
         setLocationRelativeTo(null);
-        setResizable(true);
+        setResizable(false); // Janela não redimensionável
 
         // Configurar painel principal com CardLayout
         mainPanel = new JPanel(new CardLayout());
@@ -75,28 +77,49 @@ public class ClientGUI extends JFrame {
         header.setBorder(new EmptyBorder(10, 0, 10, 0));
         contactsPanel.add(header, BorderLayout.NORTH);
 
-        // Lista de usuários
+        // Lista de usuários com duplo clique
         userModel = new DefaultListModel<>();
         userList = new JList<>(userModel);
         userList.setBackground(new Color(50, 50, 50));
         userList.setForeground(lightText);
+        userList.addMouseListener(new MouseAdapter() {
+            public void mouseClicked(MouseEvent evt) {
+                if (evt.getClickCount() == 2) { // Duplo clique
+                    startPrivateChat();
+                }
+            }
+        });
         JScrollPane userScroll = new JScrollPane(userList);
         contactsPanel.add(userScroll, BorderLayout.CENTER);
 
-        // Painel de botões
-        JPanel buttonPanel = new JPanel(new GridLayout(1, 2, 10, 10));
-        buttonPanel.setBackground(darkBg);
-        buttonPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
-        
-        JButton privateBtn = createStyledButton("Chat Privado");
-        privateBtn.addActionListener(e -> startPrivateChat());
-        
-        JButton groupBtn = createStyledButton("Criar Grupo");
+        // Painel inferior com botão e instruções
+        JPanel bottomPanel = new JPanel(new BorderLayout());
+        bottomPanel.setBackground(darkBg);
+        bottomPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
+
+        // Botão de criar grupo
+        JButton groupBtn = new JButton("+");
+        groupBtn.setBackground(accentGreen);
+        groupBtn.setForeground(Color.WHITE);
+        groupBtn.setFont(new Font("Arial", Font.BOLD, 20));
+        groupBtn.setPreferredSize(new Dimension(60, 40));
+        groupBtn.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(accentGreen.darker(), 2),
+            BorderFactory.createEmptyBorder(0, 0, 0, 0)
+        ));
         groupBtn.addActionListener(e -> createGroup());
         
-        buttonPanel.add(privateBtn);
-        buttonPanel.add(groupBtn);
-        contactsPanel.add(buttonPanel, BorderLayout.SOUTH);
+        // Texto de instrução
+        JLabel infoLabel = new JLabel(
+            "<html><div style='text-align: center; color: #888; font-size: 10px;'>" +
+            "Dê dois cliques no nome de um usuário para iniciar um chat privado.<br/>" +
+            "Clique no botão abaixo para criar um grupo." +
+            "</div></html>"
+        );
+        
+        bottomPanel.add(groupBtn, BorderLayout.NORTH);
+        bottomPanel.add(infoLabel, BorderLayout.CENTER);
+        contactsPanel.add(bottomPanel, BorderLayout.SOUTH);
     }
 
     private void createChatPanel() {
@@ -108,7 +131,9 @@ public class ClientGUI extends JFrame {
         header.setBackground(headerBg);
         header.setBorder(new EmptyBorder(5, 10, 5, 10));
         
-        JButton backBtn = createStyledButton("← Voltar");
+        JButton backBtn = new JButton("← Voltar");
+        backBtn.setBackground(new Color(70, 70, 70));
+        backBtn.setForeground(lightText);
         backBtn.addActionListener(e -> showContactsView());
         
         JLabel titleLabel = new JLabel("", SwingConstants.CENTER);
@@ -137,25 +162,14 @@ public class ClientGUI extends JFrame {
         inputField.setForeground(lightText);
         inputField.addActionListener(e -> sendMessage());
         
-        JButton sendBtn = createStyledButton("Enviar");
+        JButton sendBtn = new JButton("Enviar");
+        sendBtn.setBackground(accentGreen);
+        sendBtn.setForeground(Color.WHITE);
         sendBtn.addActionListener(e -> sendMessage());
         
         inputPanel.add(inputField, BorderLayout.CENTER);
         inputPanel.add(sendBtn, BorderLayout.EAST);
         chatPanel.add(inputPanel, BorderLayout.SOUTH);
-    }
-
-    private JButton createStyledButton(String text) {
-        JButton button = new JButton(text);
-        button.setBackground(accentGreen);
-        button.setForeground(Color.WHITE);
-        button.setFont(new Font("Arial", Font.BOLD, 12));
-        button.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(accentGreen.darker(), 2),
-            BorderFactory.createEmptyBorder(6, 12, 6, 12)
-        ));
-        button.setFocusPainted(false);
-        return button;
     }
 
     private void connect() {
