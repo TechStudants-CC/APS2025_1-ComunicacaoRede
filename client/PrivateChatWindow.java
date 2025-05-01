@@ -23,34 +23,49 @@ public class PrivateChatWindow extends JFrame {
         this.receiver = receiver;
         this.client = client;
 
-        setTitle("Privado: " + receiver);
-        setSize(500, 400);
-        setLayout(new BorderLayout());
-        getContentPane().setBackground(darkBg);
+        configureWindow();
+        initComponents();
+        setVisible(true);
+    }
 
+    private void configureWindow() {
+        setTitle("Chat: " + receiver);
+        setSize(300, 500);
+        setMinimumSize(new Dimension(280, 400));
+        setLocationRelativeTo(null);
+        setResizable(true);
+        getContentPane().setBackground(darkBg);
+        setLayout(new BorderLayout(5, 5));
+    }
+
+    private void initComponents() {
+        // Área de Chat
         chatArea = new JTextArea();
         chatArea.setEditable(false);
+        chatArea.setLineWrap(true);
+        chatArea.setWrapStyleWord(true);
         chatArea.setBackground(darkBg);
         chatArea.setForeground(lightText);
         add(new JScrollPane(chatArea), BorderLayout.CENTER);
 
-        JPanel bottom = new JPanel(new BorderLayout());
-        bottom.setBackground(darkBg);
+        // Painel Inferior
+        JPanel bottomPanel = new JPanel(new BorderLayout(5, 0));
+        bottomPanel.setBackground(darkBg);
 
         inputField = new JTextField();
         inputField.setBackground(new Color(50, 50, 50));
         inputField.setForeground(lightText);
         inputField.addActionListener(e -> sendMessage());
-        bottom.add(inputField, BorderLayout.CENTER);
+        bottomPanel.add(inputField, BorderLayout.CENTER);
 
         JButton fileBtn = new JButton("📎");
+        fileBtn.setPreferredSize(new Dimension(45, 30));
         fileBtn.setBackground(new Color(0, 150, 70));
         fileBtn.setForeground(Color.WHITE);
         fileBtn.addActionListener(e -> sendFile());
-        bottom.add(fileBtn, BorderLayout.EAST);
+        bottomPanel.add(fileBtn, BorderLayout.EAST);
 
-        add(bottom, BorderLayout.SOUTH);
-        setVisible(true);
+        add(bottomPanel, BorderLayout.SOUTH);
     }
 
     private void sendMessage() {
