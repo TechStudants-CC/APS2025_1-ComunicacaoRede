@@ -6,7 +6,7 @@ import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.IOException;
-import java.util.Arrays;
+import java.util.*;
 import java.util.List;
 import common.Message;
 import common.MessageType;
@@ -16,6 +16,11 @@ public class ClientGUI extends JFrame {
     private JList<String> userList;
     private Client client;
     private String username;
+    private List<String> grupos = new ArrayList<>();
+    
+    // Histórico de mensagens (1. Armazenamento do histórico)
+    private Map<String, List<String>> historicoMensagens = new HashMap<>();
+    private Map<String, Boolean> notificacoes = new HashMap<>();
     
     // Cores
     private final Color darkBg = new Color(30, 30, 30);
@@ -23,13 +28,32 @@ public class ClientGUI extends JFrame {
     private final Color accentGreen = new Color(0, 200, 100);
     private final Color headerBg = new Color(45, 45, 45);
     
-    // Componentes da interface
+    // Componentes
     private JPanel mainPanel;
     private JPanel contactsPanel;
     private JPanel chatPanel;
     private JTextArea chatArea;
     private JTextField inputField;
     private String currentChat;
+
+    private class ContactListRenderer extends DefaultListCellRenderer {
+        @Override
+        public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                                                      boolean isSelected, boolean cellHasFocus) {
+            JLabel label = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+            String contact = value.toString().replace(" 🔴", "");
+            
+            // 3. Exibição da notificação
+            if (notificacoes.getOrDefault(contact, false)) {
+                label.setText(contact + " 🔴");
+                label.setForeground(accentGreen);
+            } else {
+                label.setText(contact);
+                label.setForeground(lightText);
+            }
+            return label;
+        }
+    }
 
     public ClientGUI() {
         configureLookAndFeel();
@@ -49,9 +73,8 @@ public class ClientGUI extends JFrame {
         setLayout(new BorderLayout());
         getContentPane().setBackground(darkBg);
         setLocationRelativeTo(null);
-        setResizable(false); // Janela não redimensionável
+        setResizable(false);
 
-        // Configurar painel principal com CardLayout
         mainPanel = new JPanel(new CardLayout());
         mainPanel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
 
@@ -70,34 +93,38 @@ public class ClientGUI extends JFrame {
         contactsPanel = new JPanel(new BorderLayout());
         contactsPanel.setBackground(darkBg);
 
-        // Cabeçalho
         JLabel header = new JLabel("Contatos Online", SwingConstants.CENTER);
         header.setFont(new Font("Arial", Font.BOLD, 16));
         header.setForeground(accentGreen);
         header.setBorder(new EmptyBorder(10, 0, 10, 0));
         contactsPanel.add(header, BorderLayout.NORTH);
 
-        // Lista de usuários com duplo clique
         userModel = new DefaultListModel<>();
         userList = new JList<>(userModel);
+        userList.setCellRenderer(new ContactListRenderer());
         userList.setBackground(new Color(50, 50, 50));
-        userList.setForeground(lightText);
         userList.addMouseListener(new MouseAdapter() {
             public void mouseClicked(MouseEvent evt) {
-                if (evt.getClickCount() == 2) { // Duplo clique
-                    startPrivateChat();
+                if (evt.getClickCount() == 2) {
+                    String selected = userList.getSelectedValue();
+                    if (selected != null && !selected.equals(username)) {
+                        String contact = selected.replace(" 🔴", "");
+                        // 3. Limpeza da notificação
+                        notificacoes.put(contact, false);
+                        atualizarListaContatos();
+                        showChatView(contact);
+                    }
                 }
             }
         });
+        
         JScrollPane userScroll = new JScrollPane(userList);
         contactsPanel.add(userScroll, BorderLayout.CENTER);
 
-        // Painel inferior com botão e instruções
         JPanel bottomPanel = new JPanel(new BorderLayout());
         bottomPanel.setBackground(darkBg);
         bottomPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
 
-        // Botão de criar grupo
         JButton groupBtn = new JButton("+");
         groupBtn.setBackground(accentGreen);
         groupBtn.setForeground(Color.WHITE);
@@ -109,12 +136,10 @@ public class ClientGUI extends JFrame {
         ));
         groupBtn.addActionListener(e -> createGroup());
         
-        // Texto de instrução
         JLabel infoLabel = new JLabel(
             "<html><div style='text-align: center; color: #888; font-size: 10px;'>" +
-            "Dê dois cliques no nome de um usuário para iniciar um chat privado.<br/>" +
-            "Clique no botão abaixo para criar um grupo." +
-            "</div></html>"
+            "Dê dois cliques para iniciar um chat<br/>" +
+            "Clique em '+' para criar grupo</div></html>"
         );
         
         bottomPanel.add(groupBtn, BorderLayout.NORTH);
@@ -122,11 +147,50 @@ public class ClientGUI extends JFrame {
         contactsPanel.add(bottomPanel, BorderLayout.SOUTH);
     }
 
+    private void createGroup() {
+        List<String> selectedUsers = userList.getSelectedValuesList();
+        if (selectedUsers.size() >= 2) {
+            String groupName = "🧑‍🤝‍🧑 " + String.join(", ", selectedUsers);
+            if (!grupos.contains(groupName)) {
+                grupos.add(groupName);
+                userModel.addElement(groupName);
+            }
+            showChatView(groupName);
+        } else {
+            showError("Selecione pelo menos 2 usuários.");
+        }
+    }
+
+    private void atualizarListaContatos() {
+        List<String> contatosAtuais = new ArrayList<>();
+        for (int i = 0; i < userModel.getSize(); i++) {
+            contatosAtuais.add(userModel.getElementAt(i).replace(" 🔴", ""));
+        }
+        
+        userModel.clear();
+        contatosAtuais.forEach(userModel::addElement);
+    }
+
+    // 2. Carregamento do histórico ao abrir chat
+    private void showChatView(String title) {
+        currentChat = title;
+        ((JLabel) ((BorderLayout) ((Container) chatPanel.getComponent(0)).getLayout()).getLayoutComponent(BorderLayout.CENTER)).setText(title);
+        chatArea.setText("");
+        
+        // Carrega todo o histórico da conversa
+        historicoMensagens.getOrDefault(title, new ArrayList<>()).forEach(chatArea::append);
+        
+        // Remove notificação
+        notificacoes.put(title, false);
+        atualizarListaContatos();
+        
+        ((CardLayout) mainPanel.getLayout()).show(mainPanel, "chat");
+    }
+
     private void createChatPanel() {
         chatPanel = new JPanel(new BorderLayout());
         chatPanel.setBackground(darkBg);
 
-        // Cabeçalho do chat
         JPanel header = new JPanel(new BorderLayout());
         header.setBackground(headerBg);
         header.setBorder(new EmptyBorder(5, 10, 5, 10));
@@ -144,7 +208,6 @@ public class ClientGUI extends JFrame {
         header.add(titleLabel, BorderLayout.CENTER);
         chatPanel.add(header, BorderLayout.NORTH);
 
-        // Área de mensagens
         chatArea = new JTextArea();
         chatArea.setEditable(false);
         chatArea.setLineWrap(true);
@@ -153,7 +216,6 @@ public class ClientGUI extends JFrame {
         chatArea.setForeground(lightText);
         chatPanel.add(new JScrollPane(chatArea), BorderLayout.CENTER);
 
-        // Painel de entrada
         JPanel inputPanel = new JPanel(new BorderLayout());
         inputPanel.setBorder(new EmptyBorder(5, 5, 5, 5));
         
@@ -187,45 +249,27 @@ public class ClientGUI extends JFrame {
         }
     }
 
-    private void startPrivateChat() {
-        String receiver = userList.getSelectedValue();
-        if (receiver != null && !receiver.equals(username)) {
-            showChatView(receiver);
-        }
-    }
-
-    private void createGroup() {
-        List<String> selectedUsers = userList.getSelectedValuesList();
-        if (selectedUsers.size() >= 2) {
-            String groupName = String.join(",", selectedUsers);
-            showChatView(groupName);
-        } else {
-            showError("Selecione pelo menos 2 usuários.");
-        }
-    }
-
-    private void showChatView(String title) {
-        currentChat = title;
-        ((JLabel) ((BorderLayout) ((JPanel) chatPanel.getComponent(0)).getLayout()).getLayoutComponent(BorderLayout.CENTER)).setText(title);
-        chatArea.setText("");
-        ((CardLayout) mainPanel.getLayout()).show(mainPanel, "chat");
-    }
-
-    private void showContactsView() {
-        ((CardLayout) mainPanel.getLayout()).show(mainPanel, "contacts");
-    }
-
     private void sendMessage() {
         String text = inputField.getText().trim();
         if (!text.isEmpty() && currentChat != null) {
             Message msg;
-            if (currentChat.contains(",")) { // Grupo
-                msg = new Message(username, currentChat, text, MessageType.GROUP);
-            } else { // Privado
+            String formattedMessage = "[Você]: " + text + "\n";
+            
+            if (currentChat.contains("🧑‍🤝‍🧑")) {
+                // Mensagem para grupo
+                String grupo = currentChat.replace("🧑‍🤝‍🧑 ", "");
+                msg = new Message(username, grupo, text, MessageType.GROUP);
+                // 1. Armazena no histórico
+                historicoMensagens.computeIfAbsent(currentChat, k -> new ArrayList<>()).add(formattedMessage);
+            } else {
+                // Mensagem privada
                 msg = new Message(username, currentChat, text, MessageType.PRIVATE);
+                // 1. Armazena no histórico
+                historicoMensagens.computeIfAbsent(currentChat, k -> new ArrayList<>()).add(formattedMessage);
             }
+            
             client.sendMessage(msg);
-            chatArea.append("[Você]: " + text + "\n");
+            chatArea.append(formattedMessage);
             inputField.setText("");
         }
     }
@@ -234,28 +278,67 @@ public class ClientGUI extends JFrame {
         SwingUtilities.invokeLater(() -> {
             switch (msg.getType()) {
                 case USER_LIST:
+                    List<String> onlineUsers = new ArrayList<>(Arrays.asList(msg.getContent().split(",")));
+                    onlineUsers.removeIf(user -> user.trim().isEmpty() || user.equals(username));
+                    onlineUsers.addAll(grupos);
+                    
                     userModel.clear();
-                    Arrays.stream(msg.getContent().split(","))
-                        .filter(user -> !user.trim().isEmpty() && !user.trim().equals(username))
-                        .forEach(user -> userModel.addElement(user.trim()));
+                    onlineUsers.forEach(userModel::addElement);
                     break;
                     
                 case PRIVATE:
+                    String senderPriv = msg.getSender();
+                    String contentPriv = "[" + senderPriv + "]: " + msg.getContent() + "\n";
+                    // 1. Armazena no histórico
+                    historicoMensagens.computeIfAbsent(senderPriv, k -> new ArrayList<>()).add(contentPriv);
+                    
+                    if (senderPriv.equals(currentChat)) {
+                        chatArea.append(contentPriv);
+                    } else {
+                        // 3. Ativa notificação
+                        notificacoes.put(senderPriv, true);
+                        atualizarListaContatos();
+                    }
+                    break;
+                    
                 case GROUP:
-                    if (msg.getSender().equals(currentChat) || currentChat.equals(msg.getReceiver())) {
-                        chatArea.append("[" + msg.getSender() + "]: " + msg.getContent() + "\n");
+                    String groupName = msg.getReceiver();
+                    String senderGroup = msg.getSender();
+                    String contentGroup = "[" + senderGroup + "]: " + msg.getContent() + "\n";
+                    // 1. Armazena no histórico do grupo
+                    historicoMensagens.computeIfAbsent(groupName, k -> new ArrayList<>()).add(contentGroup);
+                    
+                    if (groupName.equals(currentChat)) {
+                        chatArea.append(contentGroup);
+                    } else {
+                        // 3. Ativa notificação
+                        notificacoes.put(groupName, true);
+                        atualizarListaContatos();
                     }
                     break;
                     
                 case FILE:
-                    JOptionPane.showMessageDialog(this, "Arquivo recebido de " + msg.getSender() + ": " + msg.getFileName());
+                    JOptionPane.showMessageDialog(this, "Arquivo recebido de " + msg.getSender());
                     break;
-                    
+
                 case TEXT:
-                    JOptionPane.showMessageDialog(this, "Mensagem de " + msg.getSender() + ": " + msg.getContent());
+                    String senderText = msg.getSender();
+                    String contentText = "[" + senderText + "]: " + msg.getContent() + "\n";
+                    historicoMensagens.computeIfAbsent(senderText, k -> new ArrayList<>()).add(contentText);
+
+                    if (senderText.equals(currentChat)) {
+                        chatArea.append(contentText);
+                    } else {
+                        notificacoes.put(senderText, true);
+                        atualizarListaContatos();
+                    }
                     break;
             }
         });
+    }
+
+    private void showContactsView() {
+        ((CardLayout) mainPanel.getLayout()).show(mainPanel, "contacts");
     }
 
     public void showError(String error) {
