@@ -1,5 +1,10 @@
 package common;
 
 public enum MessageType {
-    TEXT, PRIVATE, GROUP, FILE, USER_LIST
+    TEXT,
+    PRIVATE,
+    GROUP,
+    FILE,
+    USER_LIST,
+    GROUP_CREATE
 }
