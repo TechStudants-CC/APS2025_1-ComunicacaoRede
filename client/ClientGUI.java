@@ -141,8 +141,9 @@ public class ClientGUI extends JFrame {
                 enterButton.setBackground(secondaryColor);
             }
         });
-
-        enterButton.addActionListener(e -> {
+        
+        // Ação de login
+        ActionListener loginAction = e -> {
             username = nameField.getText().trim();
             if (!username.isEmpty()) {
                 try {
@@ -156,7 +157,13 @@ public class ClientGUI extends JFrame {
                 JOptionPane.showMessageDialog(loginDialog, "Digite um nome válido!", "Erro",
                         JOptionPane.ERROR_MESSAGE);
             }
-        });
+        };
+
+        // Adicionar a ação ao botão
+        enterButton.addActionListener(loginAction);
+        
+        // Adicionar a mesma ação ao campo de texto para responder à tecla Enter
+        nameField.addActionListener(loginAction);
 
         // Layout
         mainPanel.add(titleLabel);
