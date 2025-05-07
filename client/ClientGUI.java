@@ -37,6 +37,9 @@ public class ClientGUI extends JFrame {
     private JTextArea chatArea;
     private JTextField inputField;
     private String currentChat;
+    
+    // Flag para controlar o estado da visualização
+    private boolean isInChatView = false;
 
     private class ContactListRenderer extends DefaultListCellRenderer {
         @Override
@@ -404,6 +407,8 @@ public class ClientGUI extends JFrame {
 
     private void showChatView(String title) {
         currentChat = title;
+        isInChatView = true;
+        
         // Atualizar o título no cabeçalho
         ((JLabel) ((BorderLayout) ((JPanel) chatPanel.getComponent(0)).getLayout())
                 .getLayoutComponent(BorderLayout.CENTER)).setText(title);
@@ -415,6 +420,7 @@ public class ClientGUI extends JFrame {
     }
 
     private void showContactsView() {
+        isInChatView = false;
         ((CardLayout) mainPanel.getLayout()).show(mainPanel, "contacts");
     }
 
@@ -481,7 +487,8 @@ public class ClientGUI extends JFrame {
                     String contentPriv = "[" + senderPriv + "]: " + msg.getContent() + "\n";
                     historicoMensagens.computeIfAbsent(senderPriv, k -> new ArrayList<>()).add(contentPriv);
 
-                    if (senderPriv.equals(currentChat)) {
+                    // Mostrar mensagem se o chat estiver aberto ou mostrar notificação
+                    if (isInChatView && senderPriv.equals(currentChat)) {
                         chatArea.append(contentPriv);
                     } else {
                         notificacoes.put(senderPriv, true);
@@ -493,12 +500,14 @@ public class ClientGUI extends JFrame {
                     String groupName = msg.getReceiver();
                     String senderGroup = msg.getSender();
                     String contentGroup = "[" + senderGroup + "]: " + msg.getContent() + "\n";
-                    historicoMensagens.computeIfAbsent(groupName, k -> new ArrayList<>()).add(contentGroup);
+                    String formattedGroupName = "🧑‍🤝‍🧑 " + groupName;
+                    historicoMensagens.computeIfAbsent(formattedGroupName, k -> new ArrayList<>()).add(contentGroup);
 
-                    if (groupName.equals(currentChat)) {
+                    // Mostrar mensagem se o grupo estiver aberto ou mostrar notificação
+                    if (isInChatView && formattedGroupName.equals(currentChat)) {
                         chatArea.append(contentGroup);
                     } else {
-                        notificacoes.put(groupName, true);
+                        notificacoes.put(formattedGroupName, true);
                         atualizarListaContatos();
                     }
                     break;
@@ -531,7 +540,8 @@ public class ClientGUI extends JFrame {
 
                         historicoMensagens.computeIfAbsent(nomeRemetente, k -> new ArrayList<>()).add(conteudoArquivo);
 
-                        if (nomeRemetente.equals(currentChat)) {
+                        // Mostrar mensagem se o chat estiver aberto ou mostrar notificação
+                        if (isInChatView && nomeRemetente.equals(currentChat)) {
                             chatArea.append(conteudoArquivo);
                         } else {
                             notificacoes.put(nomeRemetente, true);
@@ -553,7 +563,8 @@ public class ClientGUI extends JFrame {
                     String contentText = "[" + senderText + "]: " + msg.getContent() + "\n";
                     historicoMensagens.computeIfAbsent(senderText, k -> new ArrayList<>()).add(contentText);
 
-                    if (senderText.equals(currentChat)) {
+                    // Mostrar mensagem se o chat estiver aberto ou mostrar notificação
+                    if (isInChatView && senderText.equals(currentChat)) {
                         chatArea.append(contentText);
                     } else {
                         notificacoes.put(senderText, true);
