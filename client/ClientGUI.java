@@ -19,7 +19,7 @@ public class ClientGUI extends JFrame {
     private Client client;
     private String username;
     private List<String> grupos = new ArrayList<>();
-    private Map<String, List<String>> historicoMensagens = new HashMap<>();
+    private Map<String, List<ChatMessage>> historicoMensagens = new HashMap<>();
     private Map<String, Boolean> notificacoes = new HashMap<>();
 
     // Cores
@@ -34,12 +34,49 @@ public class ClientGUI extends JFrame {
     private JPanel mainPanel;
     private JPanel contactsPanel;
     private JPanel chatPanel;
-    private JTextArea chatArea;
+    private JPanel chatMessagesPanel;
+    private JScrollPane chatScrollPane;
     private JTextField inputField;
     private String currentChat;
-    
+
     // Flag para controlar o estado da visualização
     private boolean isInChatView = false;
+
+    // Classe para armazenar mensagens no histórico
+    private static class ChatMessage {
+        private String text;
+        private boolean isFileMessage;
+        private String fileName;
+        private byte[] fileData;
+
+        public ChatMessage(String text) {
+            this.text = text;
+            this.isFileMessage = false;
+        }
+
+        public ChatMessage(String text, String fileName, byte[] fileData) {
+            this.text = text;
+            this.isFileMessage = true;
+            this.fileName = fileName;
+            this.fileData = fileData;
+        }
+
+        public String getText() {
+            return text;
+        }
+
+        public boolean isFileMessage() {
+            return isFileMessage;
+        }
+
+        public String getFileName() {
+            return fileName;
+        }
+
+        public byte[] getFileData() {
+            return fileData;
+        }
+    }
 
     private class ContactListRenderer extends DefaultListCellRenderer {
         @Override
@@ -144,7 +181,7 @@ public class ClientGUI extends JFrame {
                 enterButton.setBackground(secondaryColor);
             }
         });
-        
+
         // Ação de login
         ActionListener loginAction = e -> {
             username = nameField.getText().trim();
@@ -164,7 +201,7 @@ public class ClientGUI extends JFrame {
 
         // Adicionar a ação ao botão
         enterButton.addActionListener(loginAction);
-        
+
         // Adicionar a mesma ação ao campo de texto para responder à tecla Enter
         nameField.addActionListener(loginAction);
 
@@ -284,19 +321,16 @@ public class ClientGUI extends JFrame {
         header.add(title, BorderLayout.CENTER);
         chatPanel.add(header, BorderLayout.NORTH);
 
-        // Área de chat
-        chatArea = new JTextArea();
-        chatArea.setEditable(false);
-        chatArea.setLineWrap(true);
-        chatArea.setWrapStyleWord(true);
-        chatArea.setFont(new Font("Segoe UI", Font.PLAIN, 13));
-        chatArea.setForeground(textColor);
-        chatArea.setBackground(panelColor);
-        chatArea.setBorder(new RoundBorder(10, panelColor));
+        // Área de chat (agora usando painéis para cada mensagem)
+        chatMessagesPanel = new JPanel();
+        chatMessagesPanel.setLayout(new BoxLayout(chatMessagesPanel, BoxLayout.Y_AXIS));
+        chatMessagesPanel.setBackground(panelColor);
+        chatMessagesPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
 
-        JScrollPane scroll = new JScrollPane(chatArea);
-        scroll.setBorder(null);
-        chatPanel.add(scroll, BorderLayout.CENTER);
+        chatScrollPane = new JScrollPane(chatMessagesPanel);
+        chatScrollPane.setBorder(null);
+        chatScrollPane.getVerticalScrollBar().setUnitIncrement(16);
+        chatPanel.add(chatScrollPane, BorderLayout.CENTER);
 
         // Entrada e botões
         JPanel inputPanel = new JPanel(new BorderLayout(8, 0));
@@ -408,15 +442,95 @@ public class ClientGUI extends JFrame {
     private void showChatView(String title) {
         currentChat = title;
         isInChatView = true;
-        
+
         // Atualizar o título no cabeçalho
         ((JLabel) ((BorderLayout) ((JPanel) chatPanel.getComponent(0)).getLayout())
                 .getLayoutComponent(BorderLayout.CENTER)).setText(title);
-        chatArea.setText("");
-        historicoMensagens.getOrDefault(title, new ArrayList<>()).forEach(chatArea::append);
+
+        // Limpar o painel de mensagens
+        chatMessagesPanel.removeAll();
+
+        // Exibir o histórico de mensagens
+        List<ChatMessage> historico = historicoMensagens.getOrDefault(title, new ArrayList<>());
+        for (ChatMessage msg : historico) {
+            addMessageToPanel(msg);
+        }
+
         notificacoes.put(title, false);
         atualizarListaContatos();
         ((CardLayout) mainPanel.getLayout()).show(mainPanel, "chat");
+
+        // Rolar para o final da conversa
+        SwingUtilities.invokeLater(() -> {
+            JScrollBar vertical = chatScrollPane.getVerticalScrollBar();
+            vertical.setValue(vertical.getMaximum());
+        });
+    }
+
+    private void addMessageToPanel(ChatMessage msg) {
+        JPanel messagePanel = new JPanel();
+        messagePanel.setLayout(new BorderLayout(5, 0));
+        messagePanel.setBackground(panelColor);
+        messagePanel.setBorder(new EmptyBorder(5, 0, 5, 0));
+        messagePanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 50));
+
+        JLabel messageLabel = new JLabel(msg.getText());
+        messageLabel.setForeground(textColor);
+        messageLabel.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+
+        messagePanel.add(messageLabel, BorderLayout.CENTER);
+
+        if (msg.isFileMessage()) {
+            JButton downloadBtn = new JButton("⬇️");
+            downloadBtn.setFont(new Font("Segoe UI", Font.BOLD, 12));
+            downloadBtn.setToolTipText("Baixar arquivo");
+            downloadBtn.setBackground(secondaryColor);
+            downloadBtn.setForeground(textColor);
+            downloadBtn.setBorder(new RoundBorder(10, secondaryColor));
+            downloadBtn.setFocusPainted(false);
+            downloadBtn.setContentAreaFilled(false);
+            downloadBtn.setOpaque(true);
+            downloadBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+            // Efeito hover
+            downloadBtn.addMouseListener(new MouseAdapter() {
+                public void mouseEntered(MouseEvent evt) {
+                    downloadBtn.setBackground(secondaryColor.brighter());
+                }
+
+                public void mouseExited(MouseEvent evt) {
+                    downloadBtn.setBackground(secondaryColor);
+                }
+            });
+
+            // Ação de download
+            downloadBtn.addActionListener(e -> {
+                JFileChooser fileChooser = new JFileChooser();
+                fileChooser.setDialogTitle("Salvar arquivo");
+                fileChooser.setSelectedFile(new File(msg.getFileName()));
+
+                int result = fileChooser.showSaveDialog(this);
+                if (result == JFileChooser.APPROVE_OPTION) {
+                    File selectedFile = fileChooser.getSelectedFile();
+                    try {
+                        Files.write(selectedFile.toPath(), msg.getFileData());
+                        JOptionPane.showMessageDialog(this,
+                                "Arquivo salvo com sucesso em: " + selectedFile.getAbsolutePath(),
+                                "Download concluído",
+                                JOptionPane.INFORMATION_MESSAGE);
+                    } catch (IOException ex) {
+                        showError("Erro ao salvar arquivo: " + ex.getMessage());
+                    }
+                }
+            });
+
+            messagePanel.add(downloadBtn, BorderLayout.EAST);
+        }
+
+        chatMessagesPanel.add(messagePanel);
+        chatMessagesPanel.add(Box.createVerticalStrut(2));
+        chatMessagesPanel.revalidate();
+        chatMessagesPanel.repaint();
     }
 
     private void showContactsView() {
@@ -428,20 +542,27 @@ public class ClientGUI extends JFrame {
         String text = inputField.getText().trim();
         if (!text.isEmpty() && currentChat != null) {
             Message msg;
-            String formattedMessage = "[Você]: " + text + "\n";
+            String formattedMessage = "[Você]: " + text;
+            ChatMessage chatMsg = new ChatMessage(formattedMessage);
 
             if (currentChat.contains("🧑‍🤝‍🧑")) {
                 String grupo = currentChat.replace("🧑‍🤝‍🧑 ", "");
                 msg = new Message(username, grupo, text, MessageType.GROUP);
-                historicoMensagens.computeIfAbsent(currentChat, k -> new ArrayList<>()).add(formattedMessage);
+                historicoMensagens.computeIfAbsent(currentChat, k -> new ArrayList<>()).add(chatMsg);
             } else {
                 msg = new Message(username, currentChat, text, MessageType.PRIVATE);
-                historicoMensagens.computeIfAbsent(currentChat, k -> new ArrayList<>()).add(formattedMessage);
+                historicoMensagens.computeIfAbsent(currentChat, k -> new ArrayList<>()).add(chatMsg);
             }
 
             client.sendMessage(msg);
-            chatArea.append(formattedMessage);
+            addMessageToPanel(chatMsg);
             inputField.setText("");
+
+            // Rolar para o final da conversa
+            SwingUtilities.invokeLater(() -> {
+                JScrollBar vertical = chatScrollPane.getVerticalScrollBar();
+                vertical.setValue(vertical.getMaximum());
+            });
         }
     }
 
@@ -460,9 +581,16 @@ public class ClientGUI extends JFrame {
                 fileMessage.setFileName(file.getName());
                 client.sendMessage(fileMessage);
 
-                historicoMensagens.computeIfAbsent(currentChat, k -> new ArrayList<>())
-                        .add("[Você enviou um arquivo]: " + file.getName() + "\n");
-                chatArea.append("[Você enviou um arquivo]: " + file.getName() + "\n");
+                String displayText = "[Você enviou um arquivo]: " + file.getName();
+                ChatMessage chatMsg = new ChatMessage(displayText, file.getName(), fileData);
+                historicoMensagens.computeIfAbsent(currentChat, k -> new ArrayList<>()).add(chatMsg);
+                addMessageToPanel(chatMsg);
+
+                // Rolar para o final da conversa
+                SwingUtilities.invokeLater(() -> {
+                    JScrollBar vertical = chatScrollPane.getVerticalScrollBar();
+                    vertical.setValue(vertical.getMaximum());
+                });
             } catch (IOException e) {
                 e.printStackTrace();
                 showError("Erro ao enviar o arquivo.");
@@ -484,12 +612,18 @@ public class ClientGUI extends JFrame {
 
                 case PRIVATE:
                     String senderPriv = msg.getSender();
-                    String contentPriv = "[" + senderPriv + "]: " + msg.getContent() + "\n";
-                    historicoMensagens.computeIfAbsent(senderPriv, k -> new ArrayList<>()).add(contentPriv);
+                    String contentPriv = "[" + senderPriv + "]: " + msg.getContent();
+                    ChatMessage privateMsg = new ChatMessage(contentPriv);
+                    historicoMensagens.computeIfAbsent(senderPriv, k -> new ArrayList<>()).add(privateMsg);
 
                     // Mostrar mensagem se o chat estiver aberto ou mostrar notificação
                     if (isInChatView && senderPriv.equals(currentChat)) {
-                        chatArea.append(contentPriv);
+                        addMessageToPanel(privateMsg);
+                        // Rolar para o final da conversa
+                        SwingUtilities.invokeLater(() -> {
+                            JScrollBar vertical = chatScrollPane.getVerticalScrollBar();
+                            vertical.setValue(vertical.getMaximum());
+                        });
                     } else {
                         notificacoes.put(senderPriv, true);
                         atualizarListaContatos();
@@ -499,13 +633,19 @@ public class ClientGUI extends JFrame {
                 case GROUP:
                     String groupName = msg.getReceiver();
                     String senderGroup = msg.getSender();
-                    String contentGroup = "[" + senderGroup + "]: " + msg.getContent() + "\n";
+                    String contentGroup = "[" + senderGroup + "]: " + msg.getContent();
                     String formattedGroupName = "🧑‍🤝‍🧑 " + groupName;
-                    historicoMensagens.computeIfAbsent(formattedGroupName, k -> new ArrayList<>()).add(contentGroup);
+                    ChatMessage groupMsg = new ChatMessage(contentGroup);
+                    historicoMensagens.computeIfAbsent(formattedGroupName, k -> new ArrayList<>()).add(groupMsg);
 
                     // Mostrar mensagem se o grupo estiver aberto ou mostrar notificação
                     if (isInChatView && formattedGroupName.equals(currentChat)) {
-                        chatArea.append(contentGroup);
+                        addMessageToPanel(groupMsg);
+                        // Rolar para o final da conversa
+                        SwingUtilities.invokeLater(() -> {
+                            JScrollBar vertical = chatScrollPane.getVerticalScrollBar();
+                            vertical.setValue(vertical.getMaximum());
+                        });
                     } else {
                         notificacoes.put(formattedGroupName, true);
                         atualizarListaContatos();
@@ -526,6 +666,7 @@ public class ClientGUI extends JFrame {
                         String nomeArquivo = msg.getFileName();
                         byte[] dadosArquivo = msg.getFileData();
 
+                        // Salvar automaticamente o arquivo na pasta downloads
                         File dirDownloads = new File("downloads");
                         if (!dirDownloads.exists()) {
                             dirDownloads.mkdir();
@@ -535,14 +676,18 @@ public class ClientGUI extends JFrame {
                         Files.write(arquivo.toPath(), dadosArquivo);
                         String caminhoCompleto = arquivo.getAbsolutePath();
 
-                        String conteudoArquivo = "[Arquivo recebido de " + nomeRemetente + "]: " + nomeArquivo +
-                                " (salvo em: " + caminhoCompleto + ")\n";
-
-                        historicoMensagens.computeIfAbsent(nomeRemetente, k -> new ArrayList<>()).add(conteudoArquivo);
+                        String conteudoArquivo = "[Arquivo recebido de " + nomeRemetente + "]: " + nomeArquivo;
+                        ChatMessage fileMsg = new ChatMessage(conteudoArquivo, nomeArquivo, dadosArquivo);
+                        historicoMensagens.computeIfAbsent(nomeRemetente, k -> new ArrayList<>()).add(fileMsg);
 
                         // Mostrar mensagem se o chat estiver aberto ou mostrar notificação
                         if (isInChatView && nomeRemetente.equals(currentChat)) {
-                            chatArea.append(conteudoArquivo);
+                            addMessageToPanel(fileMsg);
+                            // Rolar para o final da conversa
+                            SwingUtilities.invokeLater(() -> {
+                                JScrollBar vertical = chatScrollPane.getVerticalScrollBar();
+                                vertical.setValue(vertical.getMaximum());
+                            });
                         } else {
                             notificacoes.put(nomeRemetente, true);
                             atualizarListaContatos();
@@ -560,12 +705,18 @@ public class ClientGUI extends JFrame {
 
                 case TEXT:
                     String senderText = msg.getSender();
-                    String contentText = "[" + senderText + "]: " + msg.getContent() + "\n";
-                    historicoMensagens.computeIfAbsent(senderText, k -> new ArrayList<>()).add(contentText);
+                    String contentText = "[" + senderText + "]: " + msg.getContent();
+                    ChatMessage textMsg = new ChatMessage(contentText);
+                    historicoMensagens.computeIfAbsent(senderText, k -> new ArrayList<>()).add(textMsg);
 
                     // Mostrar mensagem se o chat estiver aberto ou mostrar notificação
                     if (isInChatView && senderText.equals(currentChat)) {
-                        chatArea.append(contentText);
+                        addMessageToPanel(textMsg);
+                        // Rolar para o final da conversa
+                        SwingUtilities.invokeLater(() -> {
+                            JScrollBar vertical = chatScrollPane.getVerticalScrollBar();
+                            vertical.setValue(vertical.getMaximum());
+                        });
                     } else {
                         notificacoes.put(senderText, true);
                         atualizarListaContatos();
