@@ -1,3 +1,4 @@
+// common/MessageType.java
 package common;
 
 public enum MessageType {
@@ -6,5 +7,6 @@ public enum MessageType {
     GROUP,
     FILE,
     USER_LIST,
-    GROUP_CREATE
+    GROUP_CREATE,
+    STATUS_UPDATE // Novo tipo para atualizações de status
 }

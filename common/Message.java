@@ -1,3 +1,4 @@
+// common/Message.java
 package common;
 
 import java.io.Serializable;
@@ -41,32 +42,32 @@ public class Message implements Serializable {
     public MessageStatus getStatus() { return status; }
     public Date getDeliveredTime() { return deliveredTime; }
     public Date getReadTime() { return readTime; }
-    
+
     public void setFileData(byte[] fileData) { this.fileData = fileData; }
     public void setFileName(String fileName) { this.fileName = fileName; }
-    
+
     // Métodos para atualizar status
     public void markAsSent() {
         this.status = MessageStatus.SENT;
     }
-    
+
     public void markAsDelivered() {
         this.status = MessageStatus.DELIVERED;
         this.deliveredTime = new Date();
     }
-    
+
     public void markAsRead() {
         this.status = MessageStatus.READ;
         this.readTime = new Date();
     }
-    
+
     public void markAsFailed() {
         this.status = MessageStatus.FAILED;
     }
-    
+
     @Override
     public String toString() {
-        return String.format("Message[id=%s, from=%s, to=%s, type=%s, status=%s]", 
+        return String.format("Message[id=%s, from=%s, to=%s, type=%s, status=%s]",
                 messageId, sender, receiver, type, status);
     }
 }

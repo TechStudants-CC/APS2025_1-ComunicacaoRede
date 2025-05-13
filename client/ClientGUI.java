@@ -12,6 +12,7 @@ import java.util.*;
 import java.util.List;
 import common.Message;
 import common.MessageType;
+import common.MessageStatus;
 
 public class ClientGUI extends JFrame {
     private DefaultListModel<String> userModel;
@@ -48,10 +49,12 @@ public class ClientGUI extends JFrame {
         private boolean isFileMessage;
         private String fileName;
         private byte[] fileData;
+        private MessageStatus status; // Adicionado status
 
         public ChatMessage(String text) {
             this.text = text;
             this.isFileMessage = false;
+            this.status = MessageStatus.SENT; // Padrão
         }
 
         public ChatMessage(String text, String fileName, byte[] fileData) {
@@ -59,6 +62,7 @@ public class ClientGUI extends JFrame {
             this.isFileMessage = true;
             this.fileName = fileName;
             this.fileData = fileData;
+            this.status = MessageStatus.SENT; // Padrão
         }
 
         public String getText() {
@@ -76,6 +80,8 @@ public class ClientGUI extends JFrame {
         public byte[] getFileData() {
             return fileData;
         }
+
+
     }
 
     private class ContactListRenderer extends DefaultListCellRenderer {
@@ -159,6 +165,16 @@ public class ClientGUI extends JFrame {
             }
         });
 
+        JTextField serverIpField = new JTextField(15); // Campo para o IP do servidor
+        serverIpField.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+        serverIpField.setForeground(textColor);
+        serverIpField.setBackground(new Color(60, 60, 60));
+        serverIpField.setBorder(new RoundBorder(20, new Color(100, 100, 100)));
+        serverIpField.setHorizontalAlignment(JTextField.CENTER);
+        serverIpField.setMaximumSize(new Dimension(200, 40));
+        serverIpField.setAlignmentX(Component.CENTER_ALIGNMENT);
+        serverIpField.setText("192.168.56.1"); // Valor padrão (localhost)
+
         JButton enterButton = new JButton("Entrar");
         enterButton.setFont(new Font("Segoe UI", Font.BOLD, 14));
         enterButton.setForeground(textColor);
@@ -185,16 +201,17 @@ public class ClientGUI extends JFrame {
         // Ação de login
         ActionListener loginAction = e -> {
             username = nameField.getText().trim();
-            if (!username.isEmpty()) {
+            String serverIp = serverIpField.getText().trim(); // Obter IP do campo
+            if (!username.isEmpty() && !serverIp.isEmpty()) {
                 try {
-                    client = new Client("127.0.0.1", 54321, username, ClientGUI.this);
+                    client = new Client(serverIp, 54321, username, ClientGUI.this);
                     loginDialog.dispose();
                 } catch (IOException ex) {
                     showError("Falha na conexão.");
                     System.exit(1);
                 }
             } else {
-                JOptionPane.showMessageDialog(loginDialog, "Digite um nome válido!", "Erro",
+                JOptionPane.showMessageDialog(loginDialog, "Digite um nome e IP válidos!", "Erro",
                         JOptionPane.ERROR_MESSAGE);
             }
         };
@@ -204,11 +221,14 @@ public class ClientGUI extends JFrame {
 
         // Adicionar a mesma ação ao campo de texto para responder à tecla Enter
         nameField.addActionListener(loginAction);
+        serverIpField.addActionListener(loginAction);
 
         // Layout
         mainPanel.add(titleLabel);
         mainPanel.add(Box.createRigidArea(new Dimension(0, 20)));
         mainPanel.add(nameField);
+        mainPanel.add(Box.createRigidArea(new Dimension(0, 15)));
+        mainPanel.add(serverIpField);  // Adicionar campo IP
         mainPanel.add(Box.createRigidArea(new Dimension(0, 15)));
         mainPanel.add(enterButton);
 
@@ -411,8 +431,9 @@ public class ClientGUI extends JFrame {
         }
 
         @Override
-        public Insets getBorderInsets(Component c) {
-            return new Insets(radius / 2, radius / 2, radius / 2, radius / 2);
+        public Insets getBorderInsets(Component c, Insets insets) {
+            insets.set(radius / 2, radius / 2, radius / 2, radius / 2);
+            return insets;
         }
     }
 
@@ -474,7 +495,7 @@ public class ClientGUI extends JFrame {
         messagePanel.setBorder(new EmptyBorder(5, 0, 5, 0));
         messagePanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 50));
 
-        JLabel messageLabel = new JLabel(msg.getText());
+        JLabel messageLabel = new JLabel(msg.getText() + " (" + msg.status + ")");
         messageLabel.setForeground(textColor);
         messageLabel.setFont(new Font("Segoe UI", Font.PLAIN, 13));
 
@@ -601,6 +622,11 @@ public class ClientGUI extends JFrame {
     public void handleMessage(Message msg) {
         SwingUtilities.invokeLater(() -> {
             switch (msg.getType()) {
+                case STATUS_UPDATE:
+                    // Handle STATUS_UPDATE messages
+                    String statusUpdate = msg.getContent();
+                    JOptionPane.showMessageDialog(this, "Status Update: " + statusUpdate, "Status Update", JOptionPane.INFORMATION_MESSAGE);
+                    break;
                 case USER_LIST:
                     List<String> onlineUsers = new ArrayList<>(Arrays.asList(msg.getContent().split(",")));
                     onlineUsers.removeIf(user -> user.trim().isEmpty() || user.equals(username));
