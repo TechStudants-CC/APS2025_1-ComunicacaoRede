@@ -8,5 +8,6 @@ public enum MessageType {
     FILE,
     USER_LIST,
     GROUP_CREATE,
-    STATUS_UPDATE // Novo tipo para atualizações de status
+    STATUS_UPDATE, // Existente: Para o servidor notificar o cliente sobre mudanças de status
+    MESSAGE_READ   // Novo: Para o cliente notificar o servidor que uma mensagem foi lida
 }
