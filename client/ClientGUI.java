@@ -51,10 +51,8 @@ public class ClientGUI extends JFrame {
 
     private boolean isInChatView = false;
     private final SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm");
-    private static final String NOTIFICATION_ICON = " \uD83D\uDD34"; // LARGE RED CIRCLE Unicode
+    private static final String NOTIFICATION_ICON = " \uD83D\uDD34";
 
-    // Classe interna para renderizar a lista de contatos
-    // Não precisa ser static se for instanciada dentro de um método de instância de ClientGUI
     private class ContactListRenderer extends DefaultListCellRenderer {
         @Override
         public Component getListCellRendererComponent(JList<?> list, Object value, int index,
@@ -70,7 +68,7 @@ public class ClientGUI extends JFrame {
             label.setText(contactName);
             label.setFont(new Font("Segoe UI", Font.PLAIN, 16));
             label.setBorder(new EmptyBorder(10, 15, 10, 15));
-            label.setOpaque(true); // Necessário para que setBackground funcione corretamente
+            label.setOpaque(true);
 
             if (hasNotification) {
                 label.setFont(new Font("Segoe UI", Font.BOLD, 16));
@@ -80,109 +78,119 @@ public class ClientGUI extends JFrame {
             }
 
             if (isSelected) {
-                // Usa as cores de seleção definidas globalmente pelo UIManager, se disponíveis,
-                // ou cores personalizadas.
                 label.setBackground(list.getSelectionBackground());
                 label.setForeground(list.getSelectionForeground());
             } else {
-                label.setBackground(listBackground); // Cor de fundo padrão para itens não selecionados
+                label.setBackground(listBackground);
             }
             return label;
         }
     }
 
     public ClientGUI() {
-        // Configurações do UIManager que dependem de instâncias da classe interna
-        // devem ser feitas aqui, após a instância de ClientGUI ser criada.
-        // Se UIManager.put("List.cellRenderer", new ContactListRenderer()); for usado globalmente
-        // para todas as JLists, pode ser colocado aqui.
-        // No entanto, é mais comum definir o cellRenderer diretamente na instância da JList:
-        // userList.setCellRenderer(new ContactListRenderer()); -> Isso já é feito em createContactsPanel()
-
         showCustomLoginDialog();
+        
         if (username != null && !username.isEmpty() && client != null) {
             setupInterface();
         } else {
-            System.err.println("Login falhou ou foi cancelado. Encerrando.");
+            System.err.println("Login não concluído. Aplicação será encerrada.");
             System.exit(0); 
         }
     }
 
     private void showCustomLoginDialog() {
         JDialog loginDialog = new JDialog(this, "Entrar no Chat", true);
-        loginDialog.setLayout(new GridBagLayout());
-        loginDialog.getContentPane().setBackground(new Color(245, 245, 245));
-        loginDialog.setSize(380, 300);
-        loginDialog.setLocationRelativeTo(null);
-        loginDialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+        
+        JPanel dialogMainPanel = new JPanel(new GridBagLayout());
+        dialogMainPanel.setBorder(new EmptyBorder(25, 30, 25, 30));
+        dialogMainPanel.setBackground(new Color(248, 248, 248));
+        loginDialog.setContentPane(dialogMainPanel);
 
         GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(10, 15, 10, 15);
+        gbc.insets = new Insets(10, 5, 10, 5);
         gbc.gridx = 0;
         gbc.gridy = 0;
         gbc.anchor = GridBagConstraints.CENTER;
         gbc.fill = GridBagConstraints.HORIZONTAL;
 
         JLabel titleLabel = new JLabel("Chat Ambiental");
-        titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 24));
+        titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 28));
         titleLabel.setHorizontalAlignment(SwingConstants.CENTER);
+        titleLabel.setForeground(primaryColor);
         gbc.gridwidth = 2;
-        loginDialog.add(titleLabel, gbc);
+        dialogMainPanel.add(titleLabel, gbc);
+
+        gbc.gridy++; 
+        gbc.insets = new Insets(20, 5, 5, 5); 
 
         gbc.gridwidth = 1;
-        gbc.gridy++;
+        gbc.gridx = 0;
+        JLabel nameLabel = new JLabel("Seu nome:");
+        nameLabel.setFont(new Font("Segoe UI", Font.PLAIN, 15));
+        dialogMainPanel.add(nameLabel, gbc);
+
+        gbc.gridx = 1;
         JTextField nameField = new JTextField(20);
-        nameField.setBorder(BorderFactory.createTitledBorder("Seu nome de usuário"));
-        loginDialog.add(nameField, gbc);
-        
+        nameField.setFont(new Font("Segoe UI", Font.PLAIN, 15));
         ((AbstractDocument) nameField.getDocument()).setDocumentFilter(new DocumentFilter() {
+            // O método capitalize que estava aqui foi removido pois não era chamado.
+            // A lógica de capitalização está diretamente em replace e insertString.
             @Override
             public void replace(FilterBypass fb, int offset, int length, String text, AttributeSet attrs)
                     throws BadLocationException {
-                if (text != null && text.length() > 0) {
-                    if (offset == 0) { 
-                         text = text.substring(0, 1).toUpperCase() + text.substring(1);
-                    } else {
-                        String currentText = fb.getDocument().getText(0, fb.getDocument().getLength());
-                        if (currentText.length() > 0 && offset > 0 && currentText.charAt(offset-1) == ' ') {
-                             text = text.substring(0, 1).toUpperCase() + text.substring(1);
-                        }
+                String currentTextBeforeChange = fb.getDocument().getText(0, fb.getDocument().getLength());
+                String newTextSegment = text;
+
+                if (newTextSegment != null && newTextSegment.length() > 0) {
+                    // Capitaliza se for o início do campo ou se o caractere anterior for um espaço.
+                    if (offset == 0 || (offset > 0 && Character.isWhitespace(currentTextBeforeChange.charAt(offset - 1)))) {
+                         newTextSegment = newTextSegment.substring(0, 1).toUpperCase() + newTextSegment.substring(1);
                     }
                 }
-                super.replace(fb, offset, length, text, attrs);
+                super.replace(fb, offset, length, newTextSegment, attrs);
             }
 
              @Override
             public void insertString(FilterBypass fb, int offset, String string, AttributeSet attr) throws BadLocationException {
-                if (string != null && string.length() > 0) {
-                    if (offset == 0) {
-                        string = string.substring(0, 1).toUpperCase() + string.substring(1);
-                    } else {
-                        String currentText = fb.getDocument().getText(0, fb.getDocument().getLength());
-                         if (currentText.length() > 0 && offset > 0 && currentText.charAt(offset-1) == ' ') {
-                             string = string.substring(0, 1).toUpperCase() + string.substring(1);
-                        }
-                    }
-                }
-                super.insertString(fb, offset, string, attr);
+                 String currentTextBeforeChange = fb.getDocument().getText(0, fb.getDocument().getLength());
+                 String newStringSegment = string;
+                 if (newStringSegment != null && newStringSegment.length() > 0) {
+                     if (offset == 0 || (offset > 0 && Character.isWhitespace(currentTextBeforeChange.charAt(offset - 1)))) {
+                         newStringSegment = newStringSegment.substring(0, 1).toUpperCase() + newStringSegment.substring(1);
+                     }
+                 }
+                super.insertString(fb, offset, newStringSegment, attr);
             }
         });
+        dialogMainPanel.add(nameField, gbc);
 
         gbc.gridy++;
+        gbc.gridx = 0;
+        gbc.insets = new Insets(5, 5, 5, 5);
+        JLabel ipLabel = new JLabel("IP do Servidor:");
+        ipLabel.setFont(new Font("Segoe UI", Font.PLAIN, 15));
+        dialogMainPanel.add(ipLabel, gbc);
+
+        gbc.gridx = 1;
         JTextField serverIpField = new JTextField(20);
-        serverIpField.setBorder(BorderFactory.createTitledBorder("IP do Servidor"));
+        serverIpField.setFont(new Font("Segoe UI", Font.PLAIN, 15));
         serverIpField.setText("127.0.0.1");
-        loginDialog.add(serverIpField, gbc);
+        dialogMainPanel.add(serverIpField, gbc);
 
         gbc.gridy++;
+        gbc.gridx = 0;
+        gbc.gridwidth = 2;
         gbc.fill = GridBagConstraints.NONE;
         gbc.anchor = GridBagConstraints.CENTER;
+        gbc.insets = new Insets(20, 5, 10, 5);
         JButton enterButton = new JButton("Entrar");
-        enterButton.setFont(new Font("Segoe UI", Font.BOLD, 14));
+        enterButton.setFont(new Font("Segoe UI", Font.BOLD, 16));
         enterButton.setBackground(secondaryColor);
         enterButton.setForeground(Color.WHITE);
         enterButton.setFocusPainted(false);
-        enterButton.setPreferredSize(new Dimension(120, 40));
+        enterButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        enterButton.setPreferredSize(new Dimension(140, 45));
+        dialogMainPanel.add(enterButton, gbc);
 
         final String[] tempUsername = new String[1];
 
@@ -198,24 +206,26 @@ public class ClientGUI extends JFrame {
                     JOptionPane.showMessageDialog(loginDialog, "Falha na conexão: " + ex.getMessage(), "Erro de Conexão", JOptionPane.ERROR_MESSAGE);
                 }
             } else {
-                JOptionPane.showMessageDialog(loginDialog, "Nome e IP são obrigatórios!", "Erro", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(loginDialog, "Nome e IP são obrigatórios!", "Entrada Inválida", JOptionPane.WARNING_MESSAGE);
             }
         };
 
         nameField.addActionListener(loginAction);
         serverIpField.addActionListener(loginAction);
         enterButton.addActionListener(loginAction);
-        loginDialog.add(enterButton, gbc);
-        
+
+        loginDialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
         loginDialog.addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
-                 if (username == null || username.isEmpty()) { // Se o login não foi bem sucedido e fechou a janela
+                 if (username == null || username.isEmpty()) {
                     System.exit(0);
                 }
             }
         });
 
+        loginDialog.pack();
+        loginDialog.setLocationRelativeTo(null);
         loginDialog.setVisible(true);
     }
 
@@ -259,7 +269,7 @@ public class ClientGUI extends JFrame {
         btnNewGroup.setFont(new Font("Segoe UI Symbol", Font.BOLD, 16));
         btnNewGroup.setToolTipText("Criar novo grupo");
         btnNewGroup.setForeground(Color.WHITE);
-        btnNewGroup.setBackground(accentColor); // Uso de accentColor
+        btnNewGroup.setBackground(accentColor);
         btnNewGroup.setBorder(BorderFactory.createEmptyBorder(5,10,5,10));
         btnNewGroup.setFocusPainted(false);
         btnNewGroup.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
@@ -270,10 +280,8 @@ public class ClientGUI extends JFrame {
 
         userModel = new DefaultListModel<>();
         userList = new JList<>(userModel);
-        userList.setCellRenderer(new ContactListRenderer()); // Instancia aqui, no contexto de ClientGUI
+        userList.setCellRenderer(new ContactListRenderer());
         userList.setBackground(listBackground);
-        // userList.setSelectionBackground(secondaryColor.brighter()); // Pode ser controlado pelo UIManager global
-        // userList.setSelectionForeground(Color.WHITE); // Pode ser controlado pelo UIManager global
         userList.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
         userList.addMouseListener(new MouseAdapter() {
             public void mouseClicked(MouseEvent evt) {
@@ -437,7 +445,7 @@ public class ClientGUI extends JFrame {
         }
 
         int chatAreaWidth = chatScrollPane.getViewport().getWidth() > 0 ? chatScrollPane.getViewport().getWidth() : chatMessagesPanel.getWidth();
-        if(chatAreaWidth == 0) chatAreaWidth = 300; 
+        if(chatAreaWidth <= 0) chatAreaWidth = (int)(this.getWidth() * 0.8);
         bubbleWrapper.setMaximumSize(new Dimension((int)(chatAreaWidth * 0.75), Integer.MAX_VALUE));
         
         chatMessagesPanel.add(messageRowPanel);
@@ -583,6 +591,7 @@ public class ClientGUI extends JFrame {
         if (!grupos.contains(fullGroupName)) grupos.add(fullGroupName);
         if (!userModel.contains(fullGroupName)) userModel.addElement(fullGroupName);
         historicoMensagens.putIfAbsent(fullGroupName, new ArrayList<>());
+        atualizarListaContatosComNotificacao();
     }
 
 
@@ -692,7 +701,7 @@ public class ClientGUI extends JFrame {
                         }
                     }
                     
-                    if (!isOwnMessage) {
+                    if (!isOwnMessage) { 
                         historicoMensagens.computeIfAbsent(chatKey, k -> new ArrayList<>()).add(msg);
                         if (isInChatView && currentChat.equals(chatKey)) {
                             addMessageToPanel(msg, false); 
@@ -719,17 +728,17 @@ public class ClientGUI extends JFrame {
                         grupos.add(newGroupName);
                         if (!userModel.contains(newGroupName)) { 
                             userModel.addElement(newGroupName);
-                            atualizarListaContatosComNotificacao();
                         }
                         historicoMensagens.putIfAbsent(newGroupName, new ArrayList<>());
-                        if(!msg.getSender().equals(username) && msg.getSender().equals("Servidor") && msg.getReceiver().equals(username)){
-                             JOptionPane.showMessageDialog(this, "Você foi adicionado ao grupo: " + newGroupName , "Novo Grupo", JOptionPane.INFORMATION_MESSAGE);
+                        if (msg.getSender().equals("Servidor") && msg.getReceiver().equals(username)) {
+                             JOptionPane.showMessageDialog(this, "Você foi adicionado ao grupo: " + newGroupName, "Novo Grupo", JOptionPane.INFORMATION_MESSAGE);
                         }
                     }
+                    atualizarListaContatosComNotificacao();
                     break;
                 
                 case TEXT: 
-                    if (msg.getSender().equals("Servidor")) {
+                    if (msg.getSender().equals("Servidor")) { 
                         JOptionPane.showMessageDialog(this, msg.getContent(), "Mensagem do Servidor", JOptionPane.INFORMATION_MESSAGE);
                     }
                     break;
@@ -745,6 +754,19 @@ public class ClientGUI extends JFrame {
         for (int i = 0; i < userModel.getSize(); i++) {
             currentElements.add(userModel.getElementAt(i));
         }
+        for (String group : grupos) {
+            boolean found = false;
+            for (String el : currentElements) {
+                if (el.replace(NOTIFICATION_ICON, "").trim().equals(group)) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                currentElements.add(group);
+            }
+        }
+
         userModel.clear();
         for (String el : currentElements) {
             String nameWithoutIcon = el.replace(NOTIFICATION_ICON, "").trim();
@@ -784,21 +806,14 @@ public class ClientGUI extends JFrame {
             
             g2.setColor(this.color); 
             g2.setStroke(new BasicStroke(thickness));
-            // Ajuste para desenhar a borda DENTRO dos limites do componente se fillBackground for true,
-            // ou ligeiramente para fora (como antes) se for apenas uma linha.
-            // Para JTextField, a borda padrão já considera o padding.
-            // Aqui, width-thickness e height-thickness garantem que a linha da borda não exceda o componente.
             g2.drawRoundRect(x, y, width - thickness, height - thickness, radius, radius);
             g2.dispose();
         }
 
         @Override
         public Insets getBorderInsets(Component c) {
-            // Ajusta o padding para dar espaço para a borda arredondada e um pouco de respiro interno.
-            // Se a borda é apenas uma linha (filledBackground = false), o padding pode ser menor.
-            // Se filledBackground = true (como para JTextField), o padding precisa acomodar a curvatura.
-            int p = filledBackground ? radius / 2 + 2 : thickness + 2; // Padding base
-            return new Insets(p, p + 3, p, p + 3); // Mais padding horizontal
+            int p = filledBackground ? radius / 2 + 2 : thickness + 2;
+            return new Insets(p, p + 3, p, p + 3);
         }
 
         @Override
@@ -820,17 +835,13 @@ public class ClientGUI extends JFrame {
             for (UIManager.LookAndFeelInfo info : UIManager.getInstalledLookAndFeels()) {
                 if ("Nimbus".equals(info.getName())) {
                     UIManager.setLookAndFeel(info.getClassName());
-                    // Configurações globais do UIManager para Nimbus (opcional, mas ajuda na consistência)
                     UIManager.put("control", new Color(245, 245, 245)); 
-                    UIManager.put("nimbusBase", new Color(7, 94, 84)); // Cor base Nimbus (azulada por padrão, trocando para verde)
-                    UIManager.put("nimbusFocus", new Color(37, 211, 102)); // Cor de foco (verde claro)
-                    UIManager.put("text", Color.BLACK); // Cor do texto padrão
+                    UIManager.put("nimbusBase", new Color(7, 94, 84)); 
+                    UIManager.put("nimbusFocus", new Color(37, 211, 102)); 
+                    UIManager.put("text", Color.BLACK); 
                     UIManager.put("List.background", Color.WHITE);
-                    UIManager.put("List.selectionBackground", new Color(37, 211, 102)); // Verde para seleção
+                    UIManager.put("List.selectionBackground", new Color(37, 211, 102)); 
                     UIManager.put("List.selectionForeground", Color.WHITE);
-                    // A linha UIManager.put("List.cellRenderer", new ContactListRenderer()); foi removida daqui
-                    // porque ContactListRenderer não é estática e precisa de uma instância de ClientGUI.
-                    // O cellRenderer é agora definido diretamente na JList em createContactsPanel().
                     break;
                 }
             }

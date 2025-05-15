@@ -3,13 +3,17 @@ package server;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.io.*;
 import java.net.*;
 import java.text.SimpleDateFormat;
 import java.util.*;
-import java.util.List; // Explicit import
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
-// import java.util.stream.Collectors; // Não usado diretamente aqui agora
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import common.Message;
 import common.MessageType;
@@ -18,54 +22,119 @@ import common.MessageStatus;
 public class Server extends JFrame {
     private JTextArea logArea;
     private ServerSocket serverSocket;
-    private final ConcurrentHashMap<String, ClientHandler> clients = new ConcurrentHashMap<>(); // Username -> ClientHandler
-    private final ConcurrentHashMap<String, List<String>> groups = new ConcurrentHashMap<>(); // GroupName -> List<Usernames>
+    private final ConcurrentHashMap<String, ClientHandler> clients = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, List<String>> groups = new ConcurrentHashMap<>();
     private final SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
     private final int PORT = 54321;
+    private volatile boolean running = false;
+    private ExecutorService clientExecutorService;
 
     public Server() {
         setTitle("Servidor de Chat - Logs");
-        setSize(750, 550); // Aumentado para melhor visualização dos logs
-        setDefaultCloseOperation(EXIT_ON_CLOSE);
+        setSize(750, 550);
         setLocationRelativeTo(null);
 
         logArea = new JTextArea();
         logArea.setEditable(false);
-        logArea.setFont(new Font("Monospaced", Font.PLAIN, 13)); // Fonte monoespaçada para logs
+        logArea.setFont(new Font("Monospaced", Font.PLAIN, 13));
         logArea.setMargin(new Insets(5,5,5,5));
         JScrollPane scrollPane = new JScrollPane(logArea);
         add(scrollPane, BorderLayout.CENTER);
 
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                log("INFO", "SISTEMA_SHUTDOWN", "Iniciando desligamento do servidor...");
+                shutdownServer();
+            }
+        });
+        setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
+
         setVisible(true);
-        startServer();
+        new Thread(this::startServer).start();
     }
 
     private void startServer() {
+        clientExecutorService = Executors.newCachedThreadPool();
         try {
             serverSocket = new ServerSocket(PORT);
+            running = true;
             log("INFO", "SISTEMA_INIT", "Servidor iniciado na porta " + PORT + ".");
-            while (true) {
+
+            while (running) {
                 try {
                     Socket clientSocket = serverSocket.accept();
+                    if (!running) {
+                        clientSocket.close();
+                        break;
+                    }
                     log("INFO", "CONEXÃO_NOVA", "Nova conexão recebida de: " + clientSocket.getRemoteSocketAddress());
-                    new ClientHandler(clientSocket, this).start();
+                    ClientHandler handler = new ClientHandler(clientSocket, this);
+                    clientExecutorService.submit(handler);
+                } catch (SocketException e) {
+                    if (!running) {
+                        log("INFO", "SISTEMA_SOCKET", "ServerSocket fechado durante o desligamento.");
+                    } else {
+                        logError("ACEITAR_CONEXAO_SOCKET", "SocketException ao aceitar conexão", e);
+                    }
                 } catch (IOException e) {
-                    logError("ACEITAR_CONEXAO", "Erro ao aceitar nova conexão de cliente", e);
-                    // Continuar tentando aceitar outras conexões
+                    if (running) {
+                        logError("ACEITAR_CONEXAO_IO", "Erro de I/O ao aceitar nova conexão", e);
+                    }
                 }
             }
         } catch (IOException e) {
-            logError("SISTEMA_STARTUP", "Erro crítico ao iniciar o servidor na porta " + PORT, e);
-            JOptionPane.showMessageDialog(this, "Erro crítico ao iniciar servidor: " + e.getMessage() + "\nVerifique se a porta " + PORT + " está disponível.", "Erro Servidor", JOptionPane.ERROR_MESSAGE);
-            System.exit(1); // Encerra se não puder iniciar o servidor
+            if (running) {
+                logError("SISTEMA_STARTUP_FATAL", "Erro crítico ao iniciar o servidor na porta " + PORT, e);
+                JOptionPane.showMessageDialog(this, "Erro crítico ao iniciar servidor: " + e.getMessage() + "\nVerifique se a porta " + PORT + " está disponível.", "Erro Servidor", JOptionPane.ERROR_MESSAGE);
+                System.exit(1);
+            }
+        } finally {
+            log("INFO", "SISTEMA_LOOP_END", "Loop principal do servidor terminado.");
         }
     }
 
-    // Retorna false se o nome de usuário já estiver em uso
+    private void shutdownServer() {
+        if (!running) return; // Evita múltiplas chamadas de shutdown
+        running = false;
+
+        log("INFO", "SHUTDOWN_SOCKET", "Fechando ServerSocket...");
+        if (serverSocket != null && !serverSocket.isClosed()) {
+            try {
+                serverSocket.close();
+            } catch (IOException e) {
+                logError("SHUTDOWN_SOCKET_IO", "Erro ao fechar ServerSocket", e);
+            }
+        }
+
+        log("INFO", "SHUTDOWN_CLIENTS", "Desconectando clientes e parando handlers...");
+        new ArrayList<>(clients.values()).forEach(ClientHandler::closeClientSocket);
+        clients.clear();
+
+        log("INFO", "SHUTDOWN_EXECUTOR", "Desligando pool de threads dos clientes...");
+        if (clientExecutorService != null) {
+            clientExecutorService.shutdown();
+            try {
+                if (!clientExecutorService.awaitTermination(5, TimeUnit.SECONDS)) {
+                    clientExecutorService.shutdownNow();
+                    if (!clientExecutorService.awaitTermination(5, TimeUnit.SECONDS))
+                        logError("SHUTDOWN_EXECUTOR_TERMINATE", "Pool de threads não terminou", null);
+                }
+            } catch (InterruptedException ie) {
+                clientExecutorService.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+        
+        log("INFO", "SISTEMA_SHUTDOWN_COMPLETO", "Servidor desligado. Encerrando aplicação.");
+        dispose();
+        System.exit(0);
+    }
+
     public synchronized boolean addClient(String username, ClientHandler handler) {
         if (clients.containsKey(username)) {
             log("AVISO", "ADD_CLIENT_FALHA", "Tentativa de adicionar usuário '" + username + "' que já existe.");
-            return false; // Nome de usuário já em uso
+            return false; 
         }
         clients.put(username, handler);
         log("INFO", "ADD_CLIENT_SUCESSO", "Usuário conectado: " + username + " (" + handler.getRemoteSocketAddress().toString() + ")");
@@ -73,54 +142,43 @@ public class Server extends JFrame {
         return true;
     }
 
-
     public synchronized void removeClient(String username) {
         if (username == null) return;
         ClientHandler removedHandler = clients.remove(username);
         if (removedHandler != null) {
             log("INFO", "REMOVE_CLIENT", "Usuário desconectado: " + username);
             broadcastUserList();
-            // Remover usuário de todos os grupos em que participa
             groups.forEach((groupName, members) -> {
                 boolean removed = members.remove(username);
                 if (removed) {
                     log("INFO", "GRUPO_MEMBRO_REM", "Usuário " + username + " removido do grupo " + groupName);
-                    // Opcional: Se o grupo ficar vazio ou com apenas 1 membro, pode ser desfeito ou notificado.
-                    if (members.isEmpty()) {
-                        // groups.remove(groupName);
-                        // log("INFO", "GRUPO_DESFEITO", "Grupo " + groupName + " ficou vazio e foi desfeito.");
-                        // broadcastUserList(); // Atualizar lista se grupos são removidos
-                    }
                 }
             });
         }
     }
     
     public synchronized String getUserListString() {
-        // Lista de usuários + lista de nomes de grupos
         Set<String> userAndGroupNames = new HashSet<>(clients.keySet());
         userAndGroupNames.addAll(groups.keySet());
         return String.join(",", userAndGroupNames);
     }
 
-
     private synchronized void broadcastUserList() {
+        if (!running) return;
         String userListStr = getUserListString();
         Message userListMsg = new Message("Servidor", "TODOS", userListStr, MessageType.USER_LIST);
-        // log("INFO", "BROADCAST_USERLIST", "Transmitindo lista de usuários/grupos: " + userListStr);
         for (ClientHandler handler : clients.values()) {
             handler.sendMessage(userListMsg);
         }
     }
     
     public synchronized void sendPrivateMessage(Message msg, String senderUsername) {
+        if (!running) return;
         ClientHandler receiverHandler = clients.get(msg.getReceiver());
         ClientHandler senderHandler = clients.get(senderUsername);
 
         if (receiverHandler != null) {
-            // Envia a mensagem original para o destinatário
             receiverHandler.sendMessage(msg); 
-            // Notifica o remetente que a mensagem foi ENTREGUE (ao stream do destinatário)
             if (senderHandler != null && !senderUsername.equals(msg.getReceiver())) { 
                  notifyMessageStatus(senderUsername, msg.getMessageId(), MessageStatus.DELIVERED, msg.getReceiver(), new Date());
             }
@@ -133,15 +191,14 @@ public class Server extends JFrame {
     }
     
     public synchronized void sendGroupMessage(Message msgFromSender, String senderUsername) {
-        String groupName = msgFromSender.getReceiver(); // O 'receiver' da mensagem original é o nome do grupo
+        if (!running) return;
+        String groupName = msgFromSender.getReceiver();
         List<String> members = groups.get(groupName);
         ClientHandler originalSenderHandler = clients.get(senderUsername);
 
         if (members != null && !members.isEmpty()) {
-            // Cria uma nova mensagem para retransmitir, mantendo o sender original e ID.
-            // O receiver da mensagem retransmitida é o nome do grupo, para que o cliente saiba a origem.
             Message relayedMsg = new Message(msgFromSender.getMessageId(), senderUsername, groupName, msgFromSender.getContent(), MessageType.GROUP);
-            relayedMsg.setTimestamp(msgFromSender.getTimestamp()); // Mantém o timestamp original
+            relayedMsg.setTimestamp(msgFromSender.getTimestamp());
             if (msgFromSender.getFileData() != null && msgFromSender.getFileName() != null) {
                 relayedMsg.setFileData(msgFromSender.getFileData());
                 relayedMsg.setFileName(msgFromSender.getFileName());
@@ -151,25 +208,20 @@ public class Server extends JFrame {
             for (String memberUsername : members) {
                 ClientHandler memberHandler = clients.get(memberUsername);
                 if (memberHandler != null) {
-                    if (!memberUsername.equals(senderUsername)) { // Não reenviar para o próprio remetente
+                    if (!memberUsername.equals(senderUsername)) {
                         memberHandler.sendMessage(relayedMsg);
                         deliveryCount++;
                     }
-                } else {
-                    log("AVISO", "GRUPO_MEMBRO_OFFLINE", "Membro " + memberUsername + " do grupo " + groupName + " está offline.");
                 }
             }
 
-            // Notifica o remetente original sobre o status da mensagem para o grupo
             if (originalSenderHandler != null) {
-                if (deliveryCount > 0 || members.size() == 1 && members.contains(senderUsername)) { // Se entregue a alguém ou se o remetente é o único membro
+                if (deliveryCount > 0 || (members.size() == 1 && members.contains(senderUsername))) { 
                     notifyMessageStatus(senderUsername, msgFromSender.getMessageId(), MessageStatus.DELIVERED, groupName, new Date());
-                } else if (members.size() > 1) { // Se há outros membros mas ninguém recebeu
+                } else if (members.size() > 1) { 
                      notifyMessageStatus(senderUsername, msgFromSender.getMessageId(), MessageStatus.FAILED, groupName, new Date());
                 }
             }
-            log("INFO", "GRUPO_MSG_ENVIADA", String.format("Msg de %s para grupo %s encaminhada para %d/%d membros.", senderUsername, groupName, deliveryCount, members.size() - (members.contains(senderUsername) ? 1:0) ));
-
         } else {
             log("AVISO", "GRUPO_MSG_FALHA", "Grupo " + groupName + " não encontrado ou vazio para msg de " + senderUsername);
              if (originalSenderHandler != null) {
@@ -179,9 +231,10 @@ public class Server extends JFrame {
     }
     
     public synchronized void createGroup(String groupNameWithIcon, List<String> membersUsernames, String creatorUsername) {
+        if (!running) return;
         String cleanGroupName = groupNameWithIcon.startsWith("\uD83D\uDC65 ") ? groupNameWithIcon.substring(2).trim() : groupNameWithIcon.trim();
 
-        if (groups.containsKey(groupNameWithIcon) || clients.containsKey(groupNameWithIcon)) { // Checa se nome de grupo já existe como usuário também
+        if (groups.containsKey(groupNameWithIcon) || clients.containsKey(groupNameWithIcon)) {
             log("AVISO", "GRUPO_CRIA_EXISTENTE", "Tentativa de criar grupo com nome já existente: " + groupNameWithIcon);
             ClientHandler creatorHandler = clients.get(creatorUsername);
             if(creatorHandler != null) {
@@ -191,9 +244,9 @@ public class Server extends JFrame {
         }
 
         List<String> validMembers = new ArrayList<>();
-        for(String memberName : membersUsernames){ // membersUsernames já inclui o criador
-            if(clients.containsKey(memberName)){ // Verifica se o membro está online/registrado
-                if(!validMembers.contains(memberName)) { // Evita duplicados
+        for(String memberName : membersUsernames){
+            if(clients.containsKey(memberName)){ 
+                if(!validMembers.contains(memberName)) { 
                     validMembers.add(memberName);
                 }
             } else {
@@ -201,7 +254,6 @@ public class Server extends JFrame {
             }
         }
         
-        // Um grupo precisa de pelo menos 2 membros (incluindo o criador)
         if(validMembers.size() < 2){
              log("AVISO", "GRUPO_CRIA_MEMBROS_INSUF", "Grupo '" + cleanGroupName + "' não pode ser criado. Pelo menos 2 membros online são necessários. Encontrados: " + validMembers.size());
              ClientHandler creatorHandler = clients.get(creatorUsername);
@@ -215,8 +267,6 @@ public class Server extends JFrame {
         log("INFO", "GRUPO_CRIADO_SUCESSO", "Grupo: " + groupNameWithIcon + " | Criador: " + creatorUsername + " | Membros: " + validMembers);
 
         Message groupCreatedNotification = new Message("Servidor", "", groupNameWithIcon, MessageType.GROUP_CREATE);
-        // O 'content' da notificação é o nome completo do grupo.
-        // O 'sender' é "Servidor". O 'receiver' será cada membro.
         for (String memberName : validMembers) {
             ClientHandler memberHandler = clients.get(memberName);
             if (memberHandler != null) {
@@ -224,68 +274,70 @@ public class Server extends JFrame {
                 memberHandler.sendMessage(groupCreatedNotification);
             }
         }
-        broadcastUserList(); // Atualiza a lista de "contatos" de todos, que agora inclui o novo grupo.
+        broadcastUserList();
     }
 
-    // Notifica um usuário (userToNotify) sobre o status de uma mensagem (messageId) que ele originalmente enviou.
-    // relatedInfo pode ser o nome do destinatário que entregou/leu, ou o nome do grupo.
     public void notifyMessageStatus(String userToNotify, String messageId, MessageStatus status, String relatedInfo, Date eventTimestamp) {
+        if (!running && status != MessageStatus.FAILED) return;
         ClientHandler handlerToNotify = clients.get(userToNotify);
         if (handlerToNotify != null) {
-            // Formato do conteúdo: "messageId:STATUS:relatedInfo:timestampMillis"
             String statusContent = String.format("%s:%s:%s:%d", 
                                                  messageId, 
                                                  status.name(), 
-                                                 (relatedInfo != null ? relatedInfo : ""), // Evita "null" literal
+                                                 (relatedInfo != null ? relatedInfo : ""),
                                                  eventTimestamp.getTime());
 
             Message statusUpdateMsg = new Message("Servidor", userToNotify, statusContent, MessageType.STATUS_UPDATE);
-            // O timestamp da mensagem de STATUS_UPDATE em si é 'agora', mas o timestamp do evento é o eventTimestamp.
-            // O cliente usará o eventTimestamp do payload.
-            
             handlerToNotify.sendMessage(statusUpdateMsg);
-            log("INFO", "NOTIFICAR_STATUS_MSG", String.format("Notificando %s: MsgID %s -> %s (Relacionado: %s)", userToNotify, messageId, status.name(), relatedInfo));
-        } else {
-             log("AVISO", "NOTIFICAR_STATUS_FALHA", "Não foi possível notificar " + userToNotify + " (offline?) sobre MsgID " + messageId);
         }
     }
 
     public void log(String level, String category, String message) {
+        if (logArea == null) {
+            System.out.println(String.format("[%s] [%s] %s", level.toUpperCase(), category, message));
+            return;
+        }
         String timestamp = dateFormat.format(new Date());
-        // Ajuste para alinhar melhor as categorias
         String logMessage = String.format("[%s] [%-5s] [%-22s] %s", timestamp, level.toUpperCase(), category, message);
         SwingUtilities.invokeLater(() -> {
-            if (logArea.getDocument().getLength() > 20000) { // Limpa log antigo para não consumir muita memória
+            if (logArea.getDocument().getLength() > 30000) { 
                 try {
-                    logArea.replaceRange("", 0, 10000);
+                    logArea.replaceRange("", 0, 15000);
                 } catch (Exception e) { /*ignore*/ }
             }
             logArea.append(logMessage + "\n");
             logArea.setCaretPosition(logArea.getDocument().getLength()); 
         });
-        // System.out.println(logMessage); // Opcional: duplicar no console
     }
 
     public void logError(String category, String message, Throwable e) {
-        StringWriter sw = new StringWriter();
-        e.printStackTrace(new PrintWriter(sw));
-        // Pega as primeiras linhas do stack trace para concisão no log da GUI
-        String[] stackLines = sw.toString().split("\n");
-        String shortStackTrace = stackLines[0] + (stackLines.length > 1 ? " " + stackLines[1] : "");
-
         String timestamp = dateFormat.format(new Date());
-        String logMessage = String.format("[%s] [ERROR] [%-22s] %s | Exceção: %s (%s)",
-                timestamp, category, message, e.getClass().getSimpleName() +": "+ e.getMessage(), shortStackTrace);
+        String exceptionDetails = "";
+        String shortStackTrace = ""; // Variável declarada aqui
+
+        if (e != null) {
+            StringWriter sw = new StringWriter();
+            e.printStackTrace(new PrintWriter(sw));
+            String[] stackLines = sw.toString().split("\n");
+            shortStackTrace = stackLines[0] + (stackLines.length > 1 ? " " + stackLines[1] : ""); // Atribuição correta
+            exceptionDetails = String.format(" | Exceção: %s (%s)", e.getClass().getSimpleName() +": "+ e.getMessage(), shortStackTrace);
+        }
         
+        String logMessage = String.format("[%s] [ERROR] [%-22s] %s%s",
+                timestamp, category, message, exceptionDetails);
+        
+        if (logArea == null) {
+            System.err.println(logMessage);
+            if (e != null) e.printStackTrace();
+            return;
+        }
         SwingUtilities.invokeLater(() -> {
-             if (logArea.getDocument().getLength() > 20000) { 
-                try { logArea.replaceRange("", 0, 10000); } catch (Exception ex) { /*ignore*/ }
+             if (logArea.getDocument().getLength() > 30000) { 
+                try { logArea.replaceRange("", 0, 15000); } catch (Exception ex) { /*ignore*/ }
             }
             logArea.append(logMessage + "\n");
             logArea.setCaretPosition(logArea.getDocument().getLength());
         });
-        System.err.println(logMessage); // Log completo no System.err
-        // e.printStackTrace(); // Para ver o stack trace completo no console
     }
 
     public String trimContent(String content) {
