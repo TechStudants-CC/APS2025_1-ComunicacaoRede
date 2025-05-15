@@ -29,8 +29,8 @@ public class Server extends JFrame {
     private volatile boolean running = false;
     private ExecutorService clientExecutorService;
 
-    // Define o prefixo do ícone do grupo aqui, igual ao usado no ClientGUI
-    private static final String GROUP_ICON_PREFIX_SERVER_KNOWLEDGE = "\uD83D\uDC65 ";
+    // Constante para o prefixo do ícone de grupo, como o cliente envia
+    private static final String GROUP_ICON_PREFIX_FROM_CLIENT = "\uD83D\uDC65 ";
 
 
     public Server() {
@@ -147,23 +147,25 @@ public class Server extends JFrame {
         ClientHandler removedHandler = clients.remove(username);
         if (removedHandler != null) {
             log("INFO", "REMOVE_CLIENT", "Desconectado: " + username);
-            List<String> groupsModified = new ArrayList<>();
+            List<String> groupsUserWasIn = new ArrayList<>();
             for (Map.Entry<String, List<String>> entry : groups.entrySet()) {
                 if (entry.getValue().remove(username)) {
                     log("INFO", "GRUPO_MEMBRO_SAIU_OFF", username + " removido do grupo " + entry.getKey() + " (offline)");
-                    groupsModified.add(entry.getKey());
+                    groupsUserWasIn.add(entry.getKey());
                     if (entry.getValue().isEmpty()) {
-                        // Opcional: groups.remove(entry.getKey());
-                        // log("INFO", "GRUPO_VAZIO_AUTO_DEL", "Grupo " + entry.getKey() + " ficou vazio e foi removido.");
+                        // Não remove o grupo aqui, handleLeaveGroup ou outra lógica pode cuidar disso
+                        // para notificar os membros restantes, se houver, sobre a exclusão do grupo.
                     }
                 }
             }
+            // Se o usuário foi removido de algum grupo, ou apenas para atualizar a lista de usuários online
             broadcastUserList(); 
         }
     }
     
     public synchronized String getUserListString() {
         Set<String> userAndGroupNames = new HashSet<>(clients.keySet());
+        // Adiciona apenas grupos que ainda existem (não foram explicitamente deletados)
         userAndGroupNames.addAll(groups.keySet());
         return String.join(",", userAndGroupNames);
     }
@@ -182,7 +184,7 @@ public class Server extends JFrame {
         
         ClientHandler senderHandler = clients.get(senderUsername);
         if (senderHandler == null) {
-            log("AVISO", "ROTA_MSG_SENDER_NF", "Remetente " + senderUsername + " não encontrado para rotear mensagem.");
+            log("AVISO", "ROTA_MSG_SENDER_NF", "Remetente " + senderUsername + " não encontrado.");
             return;
         }
 
@@ -198,10 +200,10 @@ public class Server extends JFrame {
                 notifyMessageStatus(senderUsername, msg.getMessageId(), MessageStatus.FAILED, msg.getReceiver(), new Date());
             }
         } else if (msg.getType() == MessageType.GROUP) {
-            String groupName = msg.getReceiver();
+            String groupName = msg.getReceiver(); // Nome do grupo com ícone
             List<String> members = groups.get(groupName);
 
-            if (members != null && !members.isEmpty()) {
+            if (members != null && members.contains(senderUsername)) { // Verifica se o remetente é membro do grupo
                 Message relayedMsg = new Message(msg.getMessageId(), senderUsername, groupName, msg.getContent(), MessageType.GROUP);
                 relayedMsg.setTimestamp(msg.getTimestamp());
                 if (msg.getFileData() != null && msg.getFileName() != null) {
@@ -222,21 +224,28 @@ public class Server extends JFrame {
                 if (deliveryCount > 0 || (members.size() == 1 && members.contains(senderUsername))) {
                      notifyMessageStatus(senderUsername, msg.getMessageId(), MessageStatus.DELIVERED, groupName, new Date());
                 } else if (members.size() > 1 && !members.contains(senderUsername)){ 
+                     // Esta condição é estranha, pois já verificamos contains(senderUsername) acima.
+                     // Se chegou aqui e deliveryCount é 0, e o remetente era membro, significa que os outros estão offline.
                      notifyMessageStatus(senderUsername, msg.getMessageId(), MessageStatus.FAILED, groupName, new Date());
                 }
                  log("INFO", "ROTA_GRUPO_ENVIADA", "Msg de " + senderUsername + " para grupo " + groupName + " encaminhada para " + deliveryCount + " membros.");
-            } else {
-                log("AVISO", "ROTA_GRUPO_FALHA", "Grupo " + groupName + " não encontrado ou vazio para msg de " + senderUsername);
+            } else if (members == null) {
+                log("AVISO", "ROTA_GRUPO_FALHA_NE", "Grupo " + groupName + " não existe para msg de " + senderUsername);
                 notifyMessageStatus(senderUsername, msg.getMessageId(), MessageStatus.FAILED, groupName, new Date());
+            } else { // members != null mas não contém senderUsername
+                 log("AVISO", "ROTA_GRUPO_FALHA_NM", senderUsername + " não é membro do grupo " + groupName + ". Mensagem não enviada.");
+                 // Opcional: notificar sender que ele não é membro
+                 Message notMemberMsg = new Message("Servidor", senderUsername, "Você não pode enviar mensagens para o grupo '" + groupName.replace(GROUP_ICON_PREFIX_FROM_CLIENT, "") + "' pois não é um membro.", MessageType.TEXT);
+                 senderHandler.sendMessage(notMemberMsg);
+                 notifyMessageStatus(senderUsername, msg.getMessageId(), MessageStatus.FAILED, groupName, new Date());
             }
         }
     }
     
     public synchronized void createGroup(String groupNameWithIcon, List<String> membersUsernames, String creatorUsername) {
         if (!running) return;
-        // Usa a constante local do servidor para remover o prefixo e obter o nome limpo
-        String cleanGroupName = groupNameWithIcon.startsWith(GROUP_ICON_PREFIX_SERVER_KNOWLEDGE) ? 
-                                groupNameWithIcon.substring(GROUP_ICON_PREFIX_SERVER_KNOWLEDGE.length()).trim() : 
+        String cleanGroupName = groupNameWithIcon.startsWith(GROUP_ICON_PREFIX_FROM_CLIENT) ? 
+                                groupNameWithIcon.substring(GROUP_ICON_PREFIX_FROM_CLIENT.length()).trim() : 
                                 groupNameWithIcon.trim();
 
         if (groups.containsKey(groupNameWithIcon) || clients.containsKey(groupNameWithIcon)) {
@@ -249,7 +258,7 @@ public class Server extends JFrame {
         }
 
         List<String> validMembers = new ArrayList<>();
-        for(String memberName : membersUsernames){
+        for(String memberName : membersUsernames){ // membersUsernames já deve incluir o criador
             if(clients.containsKey(memberName)){ 
                 if(!validMembers.contains(memberName)) { 
                     validMembers.add(memberName);
@@ -258,7 +267,7 @@ public class Server extends JFrame {
         }
         
         if(validMembers.size() < 2){
-             log("AVISO", "GRUPO_CRIA_MEMBROS_INSUF", "Grupo '" + cleanGroupName + "' precisa de pelo menos 2 membros online.");
+             log("AVISO", "GRUPO_CRIA_MEMBROS_INSUF", "Grupo '" + cleanGroupName + "' precisa de pelo menos 2 membros online (incluindo criador).");
              ClientHandler creatorHandler = clients.get(creatorUsername);
              if(creatorHandler != null) {
                 creatorHandler.sendMessage(new Message("Servidor", creatorUsername, "Erro: Grupo '" + cleanGroupName + "' precisa de pelo menos 2 membros online.", MessageType.TEXT));
@@ -277,30 +286,36 @@ public class Server extends JFrame {
                 memberHandler.sendMessage(groupCreatedNotification);
             }
         }
-        broadcastUserList();
+        broadcastUserList(); // Notifica todos sobre a nova lista de "contatos" que inclui o grupo
     }
 
-    public synchronized void handleLeaveGroup(String groupName, String usernameLeaving) {
+    public synchronized void handleLeaveGroup(String groupNameWithIcon, String usernameLeaving) {
         if (!running) return;
-        List<String> members = groups.get(groupName);
+        List<String> members = groups.get(groupNameWithIcon);
         ClientHandler userLeavingHandler = clients.get(usernameLeaving);
 
         if (members != null && userLeavingHandler != null) {
             boolean removed = members.remove(usernameLeaving);
             if (removed) {
-                log("INFO", "GRUPO_SAIDA", usernameLeaving + " saiu do grupo " + groupName);
-                userLeavingHandler.sendMessage(new Message("Servidor", usernameLeaving, groupName, MessageType.GROUP_REMOVED_NOTIFICATION));
+                log("INFO", "GRUPO_SAIDA_MEMBRO", usernameLeaving + " saiu do grupo " + groupNameWithIcon);
+                // Notifica o usuário que ele saiu efetivamente
+                userLeavingHandler.sendMessage(new Message("Servidor", usernameLeaving, groupNameWithIcon, MessageType.GROUP_REMOVED_NOTIFICATION));
                 
                 if (members.isEmpty()) {
-                    groups.remove(groupName);
-                    log("INFO", "GRUPO_AUTO_DELETE", "Grupo " + groupName + " ficou vazio e foi removido.");
+                    groups.remove(groupNameWithIcon);
+                    log("INFO", "GRUPO_AUTO_DELETE_VAZIO", "Grupo " + groupNameWithIcon + " ficou vazio e foi removido do servidor.");
+                    // A remoção do 'groups' e o subsequente broadcastUserList fará com que o grupo suma para todos.
+                } else {
+                    // Opcional: notificar membros restantes. Por ora, broadcastUserList é suficiente.
+                    log("INFO", "GRUPO_MEMBROS_RESTANTES", "Grupo " + groupNameWithIcon + " agora tem " + members.size() + " membros: " + members);
                 }
-                broadcastUserList();
+                broadcastUserList(); // Atualiza a lista para todos, refletindo a saída e possível remoção do grupo
             } else {
-                log("AVISO", "GRUPO_SAIDA_FALHA_MEM", usernameLeaving + " tentou sair do grupo " + groupName + " mas não era membro.");
+                log("AVISO", "GRUPO_SAIDA_FALHA_NAOMEMBRO", usernameLeaving + " tentou sair do grupo " + groupNameWithIcon + " mas não era membro.");
             }
         } else {
-            log("AVISO", "GRUPO_SAIDA_FALHA_NGU", "Grupo " + groupName + " ou usuário " + usernameLeaving + " não encontrado para saída.");
+            if (members == null) log("AVISO", "GRUPO_SAIDA_FALHA_NAOEXISTE", "Tentativa de sair do grupo " + groupNameWithIcon + " que não existe.");
+            if (userLeavingHandler == null) log("AVISO", "GRUPO_SAIDA_FALHA_USERNF", "Usuário " + usernameLeaving + " não encontrado ao tentar sair do grupo.");
         }
     }
 
@@ -338,14 +353,14 @@ public class Server extends JFrame {
     public void logError(String category, String message, Throwable e) {
         String timestamp = dateFormat.format(new Date());
         String exceptionDetails = "";
-        String shortStackTrace = ""; // Variável declarada aqui
+        String shortStackTrace = ""; 
 
         if (e != null) {
             StringWriter sw = new StringWriter();
             e.printStackTrace(new PrintWriter(sw));
             String[] stackLines = sw.toString().split("\n");
-            shortStackTrace = stackLines[0] + (stackLines.length > 1 ? " " + stackLines[1] : "");
-            exceptionDetails = String.format(" | Exceção: %s (%s)", e.getClass().getSimpleName() +": "+ e.getMessage(), shortStackTrace);
+            shortStackTrace = stackLines[0] + (stackLines.length > 1 ? " (" + stackLines[1].trim() + ")" : "");
+            exceptionDetails = String.format(" | Exceção: %s - %s (%s)", e.getClass().getSimpleName(), e.getMessage(), shortStackTrace);
         }
         
         String logMessage = String.format("[%s] [ERROR] [%-22s] %s%s",

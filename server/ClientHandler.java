@@ -42,9 +42,6 @@ public class ClientHandler extends Thread {
         this.running = false;
         try {
             if (socket != null && !socket.isClosed()) {
-                // Tentar fechar streams antes do socket pode ajudar a liberar o readObject
-                // if (in != null) try { in.close(); } catch (IOException e) { /* ignora */ }
-                // if (out != null) try { out.close(); } catch (IOException e) { /* ignora */ }
                 socket.close();
             }
         } catch (IOException e) {
@@ -102,7 +99,7 @@ public class ClientHandler extends Thread {
             if (username != null) {
                 server.removeClient(username);
             }
-            closeResourcesFinal(); // Método renomeado para evitar confusão com closeClientSocket
+            closeResourcesFinal();
             if(running) server.log("INFO", "HANDLER_END", "Thread do ClientHandler para " + (username != null ? username : "desconhecido") + " terminada.");
              else server.log("INFO", "HANDLER_SHUTDOWN", "Thread do ClientHandler para " + (username != null ? username : "desconhecido") + " desligada.");
         }
@@ -113,8 +110,8 @@ public class ClientHandler extends Thread {
         try {
             switch (msg.getType()) {
                 case PRIVATE:
-                case GROUP: // Arquivos são tratados dentro destes tipos se fileData não for null
-                    server.routeMessage(msg, username); // Um método unificado no Server para rotear
+                case GROUP: 
+                    server.routeMessage(msg, username);
                     break;
                 
                 case GROUP_CREATE:
@@ -137,7 +134,7 @@ public class ClientHandler extends Thread {
                 
                 case LEAVE_GROUP:
                     String groupToLeave = msg.getReceiver(); // O receiver da msg LEAVE_GROUP é o nome do grupo
-                    server.handleLeaveGroup(groupToLeave, username);
+                    server.handleLeaveGroup(groupToLeave, username); // Passa o nome do usuário que está saindo
                     break;
                 
                 default:
@@ -153,29 +150,26 @@ public class ClientHandler extends Thread {
             return;
         }
         try {
-            synchronized(out) { // Sincronizar acesso ao ObjectOutputStream
+            synchronized(out) { 
                 out.writeObject(msg);
                 out.flush(); 
             }
         } catch (SocketException se) {
             if (running) server.log("AVISO","ENVIO_MSG_SOCKET_EX", "SocketException ao enviar para " + username +": " + se.getMessage());
-            this.closeClientSocket(); // Fecha proativamente se o socket falhar
+            this.closeClientSocket(); 
         }
         catch (IOException e) {
             if (running) server.logError("ENVIO_CLIENTE_IO_HANDLER", "Erro de I/O ao enviar mensagem para " + username, e);
-            this.closeClientSocket(); // Fecha proativamente
+            this.closeClientSocket(); 
         }
     }
 
     private void closeResourcesFinal() { 
-        // Este método é para fechar os streams internos do handler no final.
-        // O socket principal é idealmente fechado por closeClientSocket().
         try {
             if (in != null) in.close();
         } catch (IOException e) { /* ignora no shutdown */ }
         try {
             if (out != null) out.close();
         } catch (IOException e) { /* ignora no shutdown */ }
-        // Não feche o 'socket' aqui novamente, pois closeClientSocket já o fez.
     }
 }
