@@ -8,6 +8,10 @@ public enum MessageType {
     FILE,
     USER_LIST,
     GROUP_CREATE,
-    STATUS_UPDATE, // Existente: Para o servidor notificar o cliente sobre mudanças de status
-    MESSAGE_READ   // Novo: Para o cliente notificar o servidor que uma mensagem foi lida
+    STATUS_UPDATE,
+    MESSAGE_READ,
+
+    // Novas para gerenciamento de grupos
+    LEAVE_GROUP,                // Cliente para Servidor: Usuário quer sair de um grupo
+    GROUP_REMOVED_NOTIFICATION  // Servidor para Cliente: Notifica que o usuário foi removido de um grupo (ou o grupo foi excluído)
 }

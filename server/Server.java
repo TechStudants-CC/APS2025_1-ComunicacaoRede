@@ -29,6 +29,10 @@ public class Server extends JFrame {
     private volatile boolean running = false;
     private ExecutorService clientExecutorService;
 
+    // Define o prefixo do ícone do grupo aqui, igual ao usado no ClientGUI
+    private static final String GROUP_ICON_PREFIX_SERVER_KNOWLEDGE = "\uD83D\uDC65 ";
+
+
     public Server() {
         setTitle("Servidor de Chat - Logs");
         setSize(750, 550);
@@ -44,7 +48,7 @@ public class Server extends JFrame {
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
-                log("INFO", "SISTEMA_SHUTDOWN", "Iniciando desligamento do servidor...");
+                log("INFO", "SISTEMA_SHUTDOWN_REQ", "Requisição de desligamento do servidor...");
                 shutdownServer();
             }
         });
@@ -65,28 +69,23 @@ public class Server extends JFrame {
                 try {
                     Socket clientSocket = serverSocket.accept();
                     if (!running) {
-                        clientSocket.close();
+                        try { clientSocket.close(); } catch (IOException ex) {/*ignore*/}
                         break;
                     }
-                    log("INFO", "CONEXÃO_NOVA", "Nova conexão recebida de: " + clientSocket.getRemoteSocketAddress());
+                    log("INFO", "CONEXÃO_NOVA", "Nova conexão de: " + clientSocket.getRemoteSocketAddress());
                     ClientHandler handler = new ClientHandler(clientSocket, this);
                     clientExecutorService.submit(handler);
                 } catch (SocketException e) {
-                    if (!running) {
-                        log("INFO", "SISTEMA_SOCKET", "ServerSocket fechado durante o desligamento.");
-                    } else {
-                        logError("ACEITAR_CONEXAO_SOCKET", "SocketException ao aceitar conexão", e);
-                    }
+                    if (!running) { /* Normal durante shutdown */ } 
+                    else { logError("ACEITAR_CONEXAO_SOCKET", "SocketException ao aceitar conexão", e); }
                 } catch (IOException e) {
-                    if (running) {
-                        logError("ACEITAR_CONEXAO_IO", "Erro de I/O ao aceitar nova conexão", e);
-                    }
+                    if (running) { logError("ACEITAR_CONEXAO_IO", "Erro de I/O ao aceitar nova conexão", e); }
                 }
             }
         } catch (IOException e) {
             if (running) {
-                logError("SISTEMA_STARTUP_FATAL", "Erro crítico ao iniciar o servidor na porta " + PORT, e);
-                JOptionPane.showMessageDialog(this, "Erro crítico ao iniciar servidor: " + e.getMessage() + "\nVerifique se a porta " + PORT + " está disponível.", "Erro Servidor", JOptionPane.ERROR_MESSAGE);
+                logError("SISTEMA_STARTUP_FATAL", "Erro crítico ao iniciar servidor na porta " + PORT, e);
+                JOptionPane.showMessageDialog(this, "Erro crítico: " + e.getMessage(), "Erro Servidor", JOptionPane.ERROR_MESSAGE);
                 System.exit(1);
             }
         } finally {
@@ -94,23 +93,23 @@ public class Server extends JFrame {
         }
     }
 
-    private void shutdownServer() {
-        if (!running) return; // Evita múltiplas chamadas de shutdown
+    private synchronized void shutdownServer() {
+        if (!running) return;
         running = false;
+        log("INFO", "SHUTDOWN_PROCESSO", "Iniciando processo de desligamento do servidor...");
 
-        log("INFO", "SHUTDOWN_SOCKET", "Fechando ServerSocket...");
         if (serverSocket != null && !serverSocket.isClosed()) {
             try {
                 serverSocket.close();
+                log("INFO", "SHUTDOWN_SOCKET_SRV", "ServerSocket fechado.");
             } catch (IOException e) {
-                logError("SHUTDOWN_SOCKET_IO", "Erro ao fechar ServerSocket", e);
+                logError("SHUTDOWN_SOCKET_SRV_IO", "Erro ao fechar ServerSocket", e);
             }
         }
-
-        log("INFO", "SHUTDOWN_CLIENTS", "Desconectando clientes e parando handlers...");
+        
+        log("INFO", "SHUTDOWN_HANDLERS", "Fechando conexões de cliente...");
         new ArrayList<>(clients.values()).forEach(ClientHandler::closeClientSocket);
-        clients.clear();
-
+        
         log("INFO", "SHUTDOWN_EXECUTOR", "Desligando pool de threads dos clientes...");
         if (clientExecutorService != null) {
             clientExecutorService.shutdown();
@@ -118,26 +117,27 @@ public class Server extends JFrame {
                 if (!clientExecutorService.awaitTermination(5, TimeUnit.SECONDS)) {
                     clientExecutorService.shutdownNow();
                     if (!clientExecutorService.awaitTermination(5, TimeUnit.SECONDS))
-                        logError("SHUTDOWN_EXECUTOR_TERMINATE", "Pool de threads não terminou", null);
+                        logError("SHUTDOWN_EXECUTOR_FAIL", "Pool de threads não terminou", null);
                 }
             } catch (InterruptedException ie) {
                 clientExecutorService.shutdownNow();
                 Thread.currentThread().interrupt();
             }
         }
-        
-        log("INFO", "SISTEMA_SHUTDOWN_COMPLETO", "Servidor desligado. Encerrando aplicação.");
+        clients.clear(); 
+        groups.clear();
+        log("INFO", "SISTEMA_SHUTDOWN_COMP", "Servidor desligado. Encerrando GUI.");
         dispose();
         System.exit(0);
     }
 
     public synchronized boolean addClient(String username, ClientHandler handler) {
         if (clients.containsKey(username)) {
-            log("AVISO", "ADD_CLIENT_FALHA", "Tentativa de adicionar usuário '" + username + "' que já existe.");
+            log("AVISO", "ADD_CLIENT_DUP", "Usuário '" + username + "' já conectado. Nova conexão rejeitada.");
             return false; 
         }
         clients.put(username, handler);
-        log("INFO", "ADD_CLIENT_SUCESSO", "Usuário conectado: " + username + " (" + handler.getRemoteSocketAddress().toString() + ")");
+        log("INFO", "ADD_CLIENT_OK", "Conectado: " + username + " (" + handler.getRemoteSocketAddress() + ")");
         broadcastUserList();
         return true;
     }
@@ -146,14 +146,19 @@ public class Server extends JFrame {
         if (username == null) return;
         ClientHandler removedHandler = clients.remove(username);
         if (removedHandler != null) {
-            log("INFO", "REMOVE_CLIENT", "Usuário desconectado: " + username);
-            broadcastUserList();
-            groups.forEach((groupName, members) -> {
-                boolean removed = members.remove(username);
-                if (removed) {
-                    log("INFO", "GRUPO_MEMBRO_REM", "Usuário " + username + " removido do grupo " + groupName);
+            log("INFO", "REMOVE_CLIENT", "Desconectado: " + username);
+            List<String> groupsModified = new ArrayList<>();
+            for (Map.Entry<String, List<String>> entry : groups.entrySet()) {
+                if (entry.getValue().remove(username)) {
+                    log("INFO", "GRUPO_MEMBRO_SAIU_OFF", username + " removido do grupo " + entry.getKey() + " (offline)");
+                    groupsModified.add(entry.getKey());
+                    if (entry.getValue().isEmpty()) {
+                        // Opcional: groups.remove(entry.getKey());
+                        // log("INFO", "GRUPO_VAZIO_AUTO_DEL", "Grupo " + entry.getKey() + " ficou vazio e foi removido.");
+                    }
                 }
-            });
+            }
+            broadcastUserList(); 
         }
     }
     
@@ -172,67 +177,67 @@ public class Server extends JFrame {
         }
     }
     
-    public synchronized void sendPrivateMessage(Message msg, String senderUsername) {
+    public synchronized void routeMessage(Message msg, String senderUsername) {
         if (!running) return;
-        ClientHandler receiverHandler = clients.get(msg.getReceiver());
+        
         ClientHandler senderHandler = clients.get(senderUsername);
-
-        if (receiverHandler != null) {
-            receiverHandler.sendMessage(msg); 
-            if (senderHandler != null && !senderUsername.equals(msg.getReceiver())) { 
-                 notifyMessageStatus(senderUsername, msg.getMessageId(), MessageStatus.DELIVERED, msg.getReceiver(), new Date());
-            }
-        } else {
-            log("AVISO", "PRIVADA_FALHA_OFFLINE", "Destinatário " + msg.getReceiver() + " não encontrado/offline para msg de " + senderUsername);
-            if (senderHandler != null) {
-                 notifyMessageStatus(senderUsername, msg.getMessageId(), MessageStatus.FAILED, msg.getReceiver(), new Date());
-            }
+        if (senderHandler == null) {
+            log("AVISO", "ROTA_MSG_SENDER_NF", "Remetente " + senderUsername + " não encontrado para rotear mensagem.");
+            return;
         }
-    }
-    
-    public synchronized void sendGroupMessage(Message msgFromSender, String senderUsername) {
-        if (!running) return;
-        String groupName = msgFromSender.getReceiver();
-        List<String> members = groups.get(groupName);
-        ClientHandler originalSenderHandler = clients.get(senderUsername);
 
-        if (members != null && !members.isEmpty()) {
-            Message relayedMsg = new Message(msgFromSender.getMessageId(), senderUsername, groupName, msgFromSender.getContent(), MessageType.GROUP);
-            relayedMsg.setTimestamp(msgFromSender.getTimestamp());
-            if (msgFromSender.getFileData() != null && msgFromSender.getFileName() != null) {
-                relayedMsg.setFileData(msgFromSender.getFileData());
-                relayedMsg.setFileName(msgFromSender.getFileName());
+        if (msg.getType() == MessageType.PRIVATE) {
+            ClientHandler receiverHandler = clients.get(msg.getReceiver());
+            if (receiverHandler != null) {
+                receiverHandler.sendMessage(msg); 
+                if (!senderUsername.equals(msg.getReceiver())) { 
+                     notifyMessageStatus(senderUsername, msg.getMessageId(), MessageStatus.DELIVERED, msg.getReceiver(), new Date());
+                }
+            } else {
+                log("AVISO", "ROTA_PRIVADA_OFFLINE", "Destinatário " + msg.getReceiver() + " offline para msg de " + senderUsername);
+                notifyMessageStatus(senderUsername, msg.getMessageId(), MessageStatus.FAILED, msg.getReceiver(), new Date());
             }
-            
-            int deliveryCount = 0;
-            for (String memberUsername : members) {
-                ClientHandler memberHandler = clients.get(memberUsername);
-                if (memberHandler != null) {
-                    if (!memberUsername.equals(senderUsername)) {
-                        memberHandler.sendMessage(relayedMsg);
-                        deliveryCount++;
+        } else if (msg.getType() == MessageType.GROUP) {
+            String groupName = msg.getReceiver();
+            List<String> members = groups.get(groupName);
+
+            if (members != null && !members.isEmpty()) {
+                Message relayedMsg = new Message(msg.getMessageId(), senderUsername, groupName, msg.getContent(), MessageType.GROUP);
+                relayedMsg.setTimestamp(msg.getTimestamp());
+                if (msg.getFileData() != null && msg.getFileName() != null) {
+                    relayedMsg.setFileData(msg.getFileData());
+                    relayedMsg.setFileName(msg.getFileName());
+                }
+                
+                int deliveryCount = 0;
+                for (String memberUsername : members) {
+                    if (!memberUsername.equals(senderUsername)) { 
+                        ClientHandler memberHandler = clients.get(memberUsername);
+                        if (memberHandler != null) {
+                            memberHandler.sendMessage(relayedMsg);
+                            deliveryCount++;
+                        }
                     }
                 }
-            }
-
-            if (originalSenderHandler != null) {
-                if (deliveryCount > 0 || (members.size() == 1 && members.contains(senderUsername))) { 
-                    notifyMessageStatus(senderUsername, msgFromSender.getMessageId(), MessageStatus.DELIVERED, groupName, new Date());
-                } else if (members.size() > 1) { 
-                     notifyMessageStatus(senderUsername, msgFromSender.getMessageId(), MessageStatus.FAILED, groupName, new Date());
+                if (deliveryCount > 0 || (members.size() == 1 && members.contains(senderUsername))) {
+                     notifyMessageStatus(senderUsername, msg.getMessageId(), MessageStatus.DELIVERED, groupName, new Date());
+                } else if (members.size() > 1 && !members.contains(senderUsername)){ 
+                     notifyMessageStatus(senderUsername, msg.getMessageId(), MessageStatus.FAILED, groupName, new Date());
                 }
-            }
-        } else {
-            log("AVISO", "GRUPO_MSG_FALHA", "Grupo " + groupName + " não encontrado ou vazio para msg de " + senderUsername);
-             if (originalSenderHandler != null) {
-                notifyMessageStatus(senderUsername, msgFromSender.getMessageId(), MessageStatus.FAILED, groupName, new Date());
+                 log("INFO", "ROTA_GRUPO_ENVIADA", "Msg de " + senderUsername + " para grupo " + groupName + " encaminhada para " + deliveryCount + " membros.");
+            } else {
+                log("AVISO", "ROTA_GRUPO_FALHA", "Grupo " + groupName + " não encontrado ou vazio para msg de " + senderUsername);
+                notifyMessageStatus(senderUsername, msg.getMessageId(), MessageStatus.FAILED, groupName, new Date());
             }
         }
     }
     
     public synchronized void createGroup(String groupNameWithIcon, List<String> membersUsernames, String creatorUsername) {
         if (!running) return;
-        String cleanGroupName = groupNameWithIcon.startsWith("\uD83D\uDC65 ") ? groupNameWithIcon.substring(2).trim() : groupNameWithIcon.trim();
+        // Usa a constante local do servidor para remover o prefixo e obter o nome limpo
+        String cleanGroupName = groupNameWithIcon.startsWith(GROUP_ICON_PREFIX_SERVER_KNOWLEDGE) ? 
+                                groupNameWithIcon.substring(GROUP_ICON_PREFIX_SERVER_KNOWLEDGE.length()).trim() : 
+                                groupNameWithIcon.trim();
 
         if (groups.containsKey(groupNameWithIcon) || clients.containsKey(groupNameWithIcon)) {
             log("AVISO", "GRUPO_CRIA_EXISTENTE", "Tentativa de criar grupo com nome já existente: " + groupNameWithIcon);
@@ -249,13 +254,11 @@ public class Server extends JFrame {
                 if(!validMembers.contains(memberName)) { 
                     validMembers.add(memberName);
                 }
-            } else {
-                log("AVISO", "GRUPO_CRIA_MEMBRO_INV", "Membro " + memberName + " não encontrado/offline ao criar grupo " + cleanGroupName);
             }
         }
         
         if(validMembers.size() < 2){
-             log("AVISO", "GRUPO_CRIA_MEMBROS_INSUF", "Grupo '" + cleanGroupName + "' não pode ser criado. Pelo menos 2 membros online são necessários. Encontrados: " + validMembers.size());
+             log("AVISO", "GRUPO_CRIA_MEMBROS_INSUF", "Grupo '" + cleanGroupName + "' precisa de pelo menos 2 membros online.");
              ClientHandler creatorHandler = clients.get(creatorUsername);
              if(creatorHandler != null) {
                 creatorHandler.sendMessage(new Message("Servidor", creatorUsername, "Erro: Grupo '" + cleanGroupName + "' precisa de pelo menos 2 membros online.", MessageType.TEXT));
@@ -275,6 +278,30 @@ public class Server extends JFrame {
             }
         }
         broadcastUserList();
+    }
+
+    public synchronized void handleLeaveGroup(String groupName, String usernameLeaving) {
+        if (!running) return;
+        List<String> members = groups.get(groupName);
+        ClientHandler userLeavingHandler = clients.get(usernameLeaving);
+
+        if (members != null && userLeavingHandler != null) {
+            boolean removed = members.remove(usernameLeaving);
+            if (removed) {
+                log("INFO", "GRUPO_SAIDA", usernameLeaving + " saiu do grupo " + groupName);
+                userLeavingHandler.sendMessage(new Message("Servidor", usernameLeaving, groupName, MessageType.GROUP_REMOVED_NOTIFICATION));
+                
+                if (members.isEmpty()) {
+                    groups.remove(groupName);
+                    log("INFO", "GRUPO_AUTO_DELETE", "Grupo " + groupName + " ficou vazio e foi removido.");
+                }
+                broadcastUserList();
+            } else {
+                log("AVISO", "GRUPO_SAIDA_FALHA_MEM", usernameLeaving + " tentou sair do grupo " + groupName + " mas não era membro.");
+            }
+        } else {
+            log("AVISO", "GRUPO_SAIDA_FALHA_NGU", "Grupo " + groupName + " ou usuário " + usernameLeaving + " não encontrado para saída.");
+        }
     }
 
     public void notifyMessageStatus(String userToNotify, String messageId, MessageStatus status, String relatedInfo, Date eventTimestamp) {
@@ -301,9 +328,7 @@ public class Server extends JFrame {
         String logMessage = String.format("[%s] [%-5s] [%-22s] %s", timestamp, level.toUpperCase(), category, message);
         SwingUtilities.invokeLater(() -> {
             if (logArea.getDocument().getLength() > 30000) { 
-                try {
-                    logArea.replaceRange("", 0, 15000);
-                } catch (Exception e) { /*ignore*/ }
+                try { logArea.replaceRange("", 0, 15000); } catch (Exception e) { /*ignore*/ }
             }
             logArea.append(logMessage + "\n");
             logArea.setCaretPosition(logArea.getDocument().getLength()); 
@@ -319,7 +344,7 @@ public class Server extends JFrame {
             StringWriter sw = new StringWriter();
             e.printStackTrace(new PrintWriter(sw));
             String[] stackLines = sw.toString().split("\n");
-            shortStackTrace = stackLines[0] + (stackLines.length > 1 ? " " + stackLines[1] : ""); // Atribuição correta
+            shortStackTrace = stackLines[0] + (stackLines.length > 1 ? " " + stackLines[1] : "");
             exceptionDetails = String.format(" | Exceção: %s (%s)", e.getClass().getSimpleName() +": "+ e.getMessage(), shortStackTrace);
         }
         

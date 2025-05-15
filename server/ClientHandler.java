@@ -16,16 +16,13 @@ public class ClientHandler extends Thread {
     private ObjectInputStream in;
     private ObjectOutputStream out;
     private String username;
-    private volatile boolean running = true; // Para controlar o loop da thread
+    private volatile boolean running = true;
 
     public ClientHandler(Socket socket, Server server) {
         this.socket = socket;
         this.server = server;
     }
 
-    public ObjectOutputStream getOutputStream() {
-        return out;
-    }
     public String getUsername() {
         return this.username;
     }
@@ -34,18 +31,21 @@ public class ClientHandler extends Thread {
         if (socket != null) {
             return socket.getRemoteSocketAddress();
         }
-        return null; // Ou algum endereço placeholder
+        return null;
     }
     
-    public Socket getSocket() { // Adicionado para permitir o fechamento pelo Server
+    public Socket getSocket() {
         return this.socket;
     }
 
-    public void closeClientSocket() { // Método para ser chamado pelo servidor durante o shutdown
-        this.running = false; // Sinaliza para o loop parar
+    public void closeClientSocket() {
+        this.running = false;
         try {
             if (socket != null && !socket.isClosed()) {
-                socket.close(); // Isso deve interromper operações de bloqueio no socket (readObject)
+                // Tentar fechar streams antes do socket pode ajudar a liberar o readObject
+                // if (in != null) try { in.close(); } catch (IOException e) { /* ignora */ }
+                // if (out != null) try { out.close(); } catch (IOException e) { /* ignora */ }
+                socket.close();
             }
         } catch (IOException e) {
             server.logError("CLOSE_CLIENT_SOCKET", "Erro ao fechar socket para " + (username != null ? username : "desconhecido"), e);
@@ -56,10 +56,8 @@ public class ClientHandler extends Thread {
     @Override
     public void run() {
         try {
-            // Garante que os streams sejam criados antes de qualquer coisa
-            // O ObjectOutputStream deve ser criado ANTES do ObjectInputStream para evitar deadlock
             out = new ObjectOutputStream(socket.getOutputStream());
-            out.flush(); // Envia o cabeçalho do stream
+            out.flush();
             in = new ObjectInputStream(socket.getInputStream());
 
             this.username = (String) in.readObject(); 
@@ -68,20 +66,17 @@ public class ClientHandler extends Thread {
             if (!server.addClient(username, this)) {
                 Message errorMsg = new Message("Servidor", username, "Erro: Nome de usuário já está em uso.", MessageType.TEXT);
                 errorMsg.setStatus(MessageStatus.FAILED);
-                sendMessage(errorMsg); // Tenta enviar mensagem de erro antes de fechar
+                sendMessage(errorMsg);
                 server.log("AVISO", "AUTENTICAÇÃO_FALHA", "Nome de usuário '" + username + "' já em uso. Conexão com " + getRemoteSocketAddress() + " será fechada.");
-                this.running = false; // Impede processamento adicional
-                // Não remove o cliente aqui, pois ele não foi totalmente adicionado ou addClient falhou.
-                // O finally cuidará do closeResources.
+                this.running = false;
             } else {
-                 // Envia a lista inicial de usuários e grupos para o novo cliente
                 Message firstUserList = new Message("Servidor", username, server.getUserListString(), MessageType.USER_LIST);
                 sendMessage(firstUserList);
             }
 
             while (running && socket.isConnected() && !socket.isClosed()) {
-                Message msg = (Message) in.readObject(); // Bloqueia aqui esperando por mensagens
-                if (!running) break; // Verifica novamente após o readObject
+                Message msg = (Message) in.readObject();
+                if (!running) break;
 
                 if (msg.getTimestamp() == null) { 
                     msg.setTimestamp(new Date());
@@ -89,14 +84,14 @@ public class ClientHandler extends Thread {
                 processMessage(msg);
             }
         } catch (EOFException e) {
-            if (running) server.log("INFO", "CONEXÃO_EOF", "Cliente " + (username != null ? username : getRemoteSocketAddress()) + " desconectou inesperadamente (EOF).");
+            if (running) server.log("INFO", "CONEXÃO_EOF", "Cliente " + (username != null ? username : getRemoteSocketAddress()) + " desconectou (EOF).");
         } catch (SocketException e){
             if (running) server.log("INFO", "CONEXÃO_SOCKET_ERR", "SocketException com " + (username != null ? username : getRemoteSocketAddress()) + ": " + e.getMessage() + (socket.isClosed() ? " (Socket fechado)" : ""));
         }
         catch (IOException e) {
-            if (running) { // Só loga se não for um fechamento esperado
-                if ("Connection reset".equalsIgnoreCase(e.getMessage()) || e.getMessage().toLowerCase().contains("socket closed")) {
-                     server.log("INFO", "CONEXÃO_IO_RESET", "Conexão com " + (username != null ? username : getRemoteSocketAddress()) + " foi resetada/fechada.");
+            if (running) {
+                if ("Connection reset".equalsIgnoreCase(e.getMessage()) || e.getMessage().toLowerCase().contains("socket closed") || e.getMessage().toLowerCase().contains("stream closed")) {
+                     server.log("INFO", "CONEXÃO_IO_RESET", "Conexão com " + (username != null ? username : getRemoteSocketAddress()) + " foi encerrada.");
                 } else {
                     server.logError("CONEXÃO_IO_HANDLER", "Erro de I/O com " + (username != null ? username : getRemoteSocketAddress()), e);
                 }
@@ -104,40 +99,28 @@ public class ClientHandler extends Thread {
         } catch (ClassNotFoundException e) {
             if (running) server.logError("PROTOCOLO_HANDLER_CNFE", "Erro de classe não encontrada de " + (username != null ? username : getRemoteSocketAddress()), e);
         } finally {
-            if (username != null) { // Garante que só remove se o username foi estabelecido
+            if (username != null) {
                 server.removeClient(username);
             }
-            closeResources(); // Fecha os streams deste handler
+            closeResourcesFinal(); // Método renomeado para evitar confusão com closeClientSocket
             if(running) server.log("INFO", "HANDLER_END", "Thread do ClientHandler para " + (username != null ? username : "desconhecido") + " terminada.");
+             else server.log("INFO", "HANDLER_SHUTDOWN", "Thread do ClientHandler para " + (username != null ? username : "desconhecido") + " desligada.");
         }
     }
 
     private void processMessage(Message msg) {
-        if (!running) return; // Não processa se o handler está parando
+        if (!running) return;
         try {
             switch (msg.getType()) {
                 case PRIVATE:
-                    if (msg.getFileData() != null && msg.getFileName() != null) {
-                        server.log("INFO", "ARQUIVO_PRIVADO_RECV", String.format("De: %s | Para: %s | Arquivo: %s", username, msg.getReceiver(), msg.getFileName()));
-                    } else {
-                        // server.log("INFO", "MSG_PRIVADA_RECV", String.format("De: %s | Para: %s | Conteúdo: %s", username, msg.getReceiver(), server.trimContent(msg.getContent())));
-                    }
-                    server.sendPrivateMessage(msg, username);
-                    break;
-
-                case GROUP:
-                     if (msg.getFileData() != null && msg.getFileName() != null) {
-                        server.log("INFO", "ARQUIVO_GRUPO_RECV", String.format("De: %s | Para Grupo: %s | Arquivo: %s", username, msg.getReceiver(), msg.getFileName()));
-                    } else {
-                        // server.log("INFO", "MSG_GRUPO_RECV", String.format("De: %s | Para Grupo: %s | Conteúdo: %s", username, msg.getReceiver(), server.trimContent(msg.getContent())));
-                    }
-                    server.sendGroupMessage(msg, username);
+                case GROUP: // Arquivos são tratados dentro destes tipos se fileData não for null
+                    server.routeMessage(msg, username); // Um método unificado no Server para rotear
                     break;
                 
                 case GROUP_CREATE:
                     String[] parts = msg.getContent().split(";", 2);
                     if (parts.length < 2) {
-                        server.log("AVISO", "GRUPO_CRIA_MALFORMADO", "Mensagem de criação de grupo malformada de " + username + ": " + msg.getContent());
+                        server.log("AVISO", "GRUPO_CRIA_MALFORMADO", "Msg de criação de grupo malformada de " + username);
                         return;
                     }
                     String groupName = parts[0];
@@ -149,15 +132,12 @@ public class ClientHandler extends Thread {
                     String messageIdRead = msg.getMessageId(); 
                     String originalSenderOfInitialMsg = msg.getReceiver(); 
                     String readerUsername = msg.getSender();
-
-                    server.notifyMessageStatus(
-                        originalSenderOfInitialMsg, 
-                        messageIdRead,
-                        MessageStatus.READ,
-                        readerUsername,
-                        new Date()
-                    );
-                    // server.log("INFO", "STATUS_LIDO_PROC", "Msg " + messageIdRead + " lida por " + readerUsername + ". Notificando remetente original " + originalSenderOfInitialMsg);
+                    server.notifyMessageStatus(originalSenderOfInitialMsg, messageIdRead, MessageStatus.READ, readerUsername, new Date());
+                    break;
+                
+                case LEAVE_GROUP:
+                    String groupToLeave = msg.getReceiver(); // O receiver da msg LEAVE_GROUP é o nome do grupo
+                    server.handleLeaveGroup(groupToLeave, username);
                     break;
                 
                 default:
@@ -170,35 +150,32 @@ public class ClientHandler extends Thread {
     
     public void sendMessage(Message msg) {
         if (!running || out == null || socket == null || socket.isOutputShutdown() || socket.isClosed()) {
-            // server.log("AVISO", "ENVIO_FALHOU_PRECHECK", "Não foi possível enviar mensagem para " + username + " (handler/socket não pronto ou fechando).");
             return;
         }
         try {
-            out.writeObject(msg);
-            out.flush(); 
+            synchronized(out) { // Sincronizar acesso ao ObjectOutputStream
+                out.writeObject(msg);
+                out.flush(); 
+            }
         } catch (SocketException se) {
-            if (running) server.log("AVISO","ENVIO_MSG_SOCKET_EX", "SocketException ao enviar para " + username +": " + se.getMessage() + (socket.isClosed() ? " (Socket agora fechado)" : ""));
-            this.running = false; // Provavelmente a conexão caiu, sinaliza para parar
+            if (running) server.log("AVISO","ENVIO_MSG_SOCKET_EX", "SocketException ao enviar para " + username +": " + se.getMessage());
+            this.closeClientSocket(); // Fecha proativamente se o socket falhar
         }
         catch (IOException e) {
             if (running) server.logError("ENVIO_CLIENTE_IO_HANDLER", "Erro de I/O ao enviar mensagem para " + username, e);
-            this.running = false; // Sinaliza para parar em caso de erro de IO sério
+            this.closeClientSocket(); // Fecha proativamente
         }
     }
 
-    private void closeResources() { // Chamado no finally do run()
+    private void closeResourcesFinal() { 
+        // Este método é para fechar os streams internos do handler no final.
+        // O socket principal é idealmente fechado por closeClientSocket().
         try {
             if (in != null) in.close();
-        } catch (IOException e) {
-            // Não logar erro aqui se !running, pois é esperado durante shutdown
-            if(running) server.logError("FECHAR_IN_HANDLER", "Erro ao fechar InputStream para " + (username != null ? username : getRemoteSocketAddress()), e);
-        }
+        } catch (IOException e) { /* ignora no shutdown */ }
         try {
             if (out != null) out.close();
-        } catch (IOException e) {
-            if(running) server.logError("FECHAR_OUT_HANDLER", "Erro ao fechar OutputStream para " + (username != null ? username : getRemoteSocketAddress()), e);
-        }
-        // O socket principal é fechado pelo método closeClientSocket() ou pelo finally se ocorrer exceção antes
-        // Não feche o 'socket' diretamente aqui novamente se closeClientSocket() já foi chamado.
+        } catch (IOException e) { /* ignora no shutdown */ }
+        // Não feche o 'socket' aqui novamente, pois closeClientSocket já o fez.
     }
 }
