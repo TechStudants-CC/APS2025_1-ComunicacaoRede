@@ -33,7 +33,7 @@ public class ClientHandler extends Thread {
         }
         return null;
     }
-    
+
     public Socket getSocket() {
         return this.socket;
     }
@@ -54,28 +54,29 @@ public class ClientHandler extends Thread {
     public void run() {
         try {
             out = new ObjectOutputStream(socket.getOutputStream());
-            out.flush();
+            out.flush(); 
             in = new ObjectInputStream(socket.getInputStream());
 
-            this.username = (String) in.readObject(); 
+            this.username = (String) in.readObject();
             server.log("INFO", "AUTENTICAÇÃO", "Usuário '" + username + "' conectando de " + socket.getInetAddress().getHostAddress());
-            
+
             if (!server.addClient(username, this)) {
                 Message errorMsg = new Message("Servidor", username, "Erro: Nome de usuário já está em uso.", MessageType.TEXT);
                 errorMsg.setStatus(MessageStatus.FAILED);
                 sendMessage(errorMsg);
                 server.log("AVISO", "AUTENTICAÇÃO_FALHA", "Nome de usuário '" + username + "' já em uso. Conexão com " + getRemoteSocketAddress() + " será fechada.");
-                this.running = false;
+                this.running = false; 
             } else {
-                Message firstUserList = new Message("Servidor", username, server.getUserListString(), MessageType.USER_LIST);
+                Message firstUserList = new Message("Servidor", username, server.getUserListString(this.username), MessageType.USER_LIST);
                 sendMessage(firstUserList);
+                server.broadcastUserList(); 
             }
 
             while (running && socket.isConnected() && !socket.isClosed()) {
                 Message msg = (Message) in.readObject();
-                if (!running) break;
+                if (!running) break; 
 
-                if (msg.getTimestamp() == null) { 
+                if (msg.getTimestamp() == null) {
                     msg.setTimestamp(new Date());
                 }
                 processMessage(msg);
@@ -97,11 +98,11 @@ public class ClientHandler extends Thread {
             if (running) server.logError("PROTOCOLO_HANDLER_CNFE", "Erro de classe não encontrada de " + (username != null ? username : getRemoteSocketAddress()), e);
         } finally {
             if (username != null) {
-                server.removeClient(username);
+                server.removeClient(username); 
             }
             closeResourcesFinal();
             if(running) server.log("INFO", "HANDLER_END", "Thread do ClientHandler para " + (username != null ? username : "desconhecido") + " terminada.");
-             else server.log("INFO", "HANDLER_SHUTDOWN", "Thread do ClientHandler para " + (username != null ? username : "desconhecido") + " desligada.");
+             else server.log("INFO", "HANDLER_SHUTDOWN", "Thread do ClientHandler para " + (username != null ? username : "desconhecido") + " desligada (running=false).");
         }
     }
 
@@ -113,49 +114,55 @@ public class ClientHandler extends Thread {
                 case GROUP: 
                     server.routeMessage(msg, username);
                     break;
-                
+
                 case GROUP_CREATE:
                     String[] parts = msg.getContent().split(";", 2);
                     if (parts.length < 2) {
                         server.log("AVISO", "GRUPO_CRIA_MALFORMADO", "Msg de criação de grupo malformada de " + username);
                         return;
                     }
-                    String groupName = parts[0];
+                    String groupName = parts[0]; // Este é o groupNameWithIcon
                     List<String> members = Arrays.asList(parts[1].split(","));
                     server.createGroup(groupName, members, username);
                     break;
 
                 case MESSAGE_READ:
-                    String messageIdRead = msg.getMessageId(); 
-                    String originalSenderOfInitialMsg = msg.getReceiver(); 
-                    String readerUsername = msg.getSender();
+                    String messageIdRead = msg.getMessageId();
+                    String originalSenderOfInitialMsg = msg.getReceiver(); // O receiver da msg de READ é quem enviou a msg original
+                    String readerUsername = msg.getSender(); // Quem leu
                     server.notifyMessageStatus(originalSenderOfInitialMsg, messageIdRead, MessageStatus.READ, readerUsername, new Date());
                     break;
-                
+
                 case LEAVE_GROUP:
-                    String groupToLeave = msg.getReceiver(); // O receiver da msg LEAVE_GROUP é o nome do grupo
-                    server.handleLeaveGroup(groupToLeave, username); // Passa o nome do usuário que está saindo
+                    String groupToLeave = msg.getReceiver(); // O receiver da msg LEAVE_GROUP é o nome do grupo (com ícone)
+                    server.handleLeaveGroup(groupToLeave, username); 
                     break;
                 
+                case GROUP_INFO_REQUEST:
+                    // O 'receiver' da mensagem GROUP_INFO_REQUEST é o nome do grupo do qual se quer informação
+                    String groupNameForInfo = msg.getReceiver(); 
+                    server.handleGroupInfoRequest(groupNameForInfo, username);
+                    break;
+
                 default:
                     server.log("AVISO", "TIPO_MSG_DESCONHECIDO", "Tipo de mensagem não reconhecido de " + username + ": " + msg.getType());
             }
         } catch (Exception e) {
-            server.logError("PROCESSAMENTO_MSG_HANDLER", "Erro ao processar mensagem de " + username + ": " + msg.getContent(), e);
+            server.logError("PROCESSAMENTO_MSG_HANDLER", "Erro ao processar mensagem de " + username + ": " + server.trimContent(msg.toString()), e);
         }
     }
-    
+
     public void sendMessage(Message msg) {
         if (!running || out == null || socket == null || socket.isOutputShutdown() || socket.isClosed()) {
             return;
         }
         try {
-            synchronized(out) { 
+            synchronized(out) {
                 out.writeObject(msg);
-                out.flush(); 
+                out.flush();
             }
         } catch (SocketException se) {
-            if (running) server.log("AVISO","ENVIO_MSG_SOCKET_EX", "SocketException ao enviar para " + username +": " + se.getMessage());
+            if (running) server.log("AVISO","ENVIO_MSG_SOCKET_EX", "SocketException ao enviar para " + username +": " + se.getMessage() + ". Fechando socket.");
             this.closeClientSocket(); 
         }
         catch (IOException e) {
@@ -164,7 +171,7 @@ public class ClientHandler extends Thread {
         }
     }
 
-    private void closeResourcesFinal() { 
+    private void closeResourcesFinal() {
         try {
             if (in != null) in.close();
         } catch (IOException e) { /* ignora no shutdown */ }
