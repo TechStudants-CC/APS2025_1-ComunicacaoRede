@@ -1,4 +1,3 @@
-// server/Server.java
 package server;
 
 import javax.swing.*;
@@ -14,7 +13,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-// Removido: import java.util.stream.Collectors;
 
 import common.Message;
 import common.MessageType;
@@ -30,7 +28,7 @@ public class Server extends JFrame {
     private volatile boolean running = false;
     private ExecutorService clientExecutorService;
 
-    public static final String GROUP_ICON_PREFIX = "\uD83D\uDC65 "; // Usado para identificar grupos
+    public static final String GROUP_ICON_PREFIX = "\uD83D\uDC65 "; 
 
     public Server() {
         setTitle("Servidor de Chat - Logs");

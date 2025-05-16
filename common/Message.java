@@ -1,4 +1,3 @@
-// common/Message.java
 package common;
 
 import java.io.Serializable;

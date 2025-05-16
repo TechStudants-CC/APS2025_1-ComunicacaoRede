@@ -1,4 +1,3 @@
-// client/Client.java
 package client;
 
 import java.io.*;

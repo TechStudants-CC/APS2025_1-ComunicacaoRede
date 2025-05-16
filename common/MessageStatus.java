@@ -1,4 +1,3 @@
-// common/MessageStatus.java
 package common;
 
 /**

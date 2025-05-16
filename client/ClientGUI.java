@@ -1,4 +1,3 @@
-// client/ClientGUI.java
 package client;
 
 import javax.swing.*;
